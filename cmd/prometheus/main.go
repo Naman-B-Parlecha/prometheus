@@ -670,6 +670,7 @@ func main() {
 	}
 	if cfgFile.StorageConfig.TSDBConfig != nil {
 		cfg.tsdb.OutOfOrderTimeWindow = cfgFile.StorageConfig.TSDBConfig.OutOfOrderTimeWindow
+		cfg.tsdb.BlockReloadInterval = cfgFile.StorageConfig.TSDBConfig.BlockReloadInterval
 	}
 
 	// Set Go runtime parameters before we get too far into initialization.
@@ -1868,7 +1869,6 @@ type tsdbOptions struct {
 }
 
 func (opts tsdbOptions) ToTSDBOptions() tsdb.Options {
-	slog.Log(context.Background(), slog.LevelDebug, "DEBUGGNG = TSDB options", "BlockReloadInterval", opts.BlockReloadInterval)
 	return tsdb.Options{
 		WALSegmentSize:                 int(opts.WALSegmentSize),
 		MaxBlockChunkSegmentSize:       int64(opts.MaxBlockChunkSegmentSize),
