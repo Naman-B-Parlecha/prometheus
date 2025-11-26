@@ -69,6 +69,69 @@ func readHistogramChunkLayout(b *bstreamReader) (
 	return schema, zeroThreshold, positiveSpans, negativeSpans, customValues, err
 }
 
+func writeNSChunkLayout(
+	b *bstream, schema int32, quantileTargets []float64,
+) {
+	putVarbitInt(b, int64(schema))
+	putNSChunkLayoutQuantileTarget(b, quantileTargets)
+}
+
+func putNSChunkLayoutQuantileTarget(b *bstream, quantileTargets []float64) {
+	putVarbitUint(b, uint64(len(quantileTargets)))
+	for _, bound := range quantileTargets {
+		putQuantileTargets(b, bound)
+	}
+}
+func putQuantileTargets(b *bstream, f float64) {
+	tf := f * 1000
+	// 33554431-1 comes from the maximum that can be stored in a varbit in 4
+	// bytes, other values are stored in 8 bytes anyway.
+	if tf < 0 || tf > 33554430 || !isWholeWhenMultiplied(f) {
+		b.writeBit(zero)
+		b.writeBits(math.Float64bits(f), 64)
+		return
+	}
+	putVarbitUint(b, uint64(math.Round(tf))+1)
+}
+func readNSChunkLayout(b *bstreamReader) (schema int32, quantileTargets []float64, err error) {
+	v, err := readVarbitInt(b)
+	if err != nil {
+		return schema, nil, err
+	}
+	schema = int32(v)
+
+	num, err := readVarbitUint(b)
+	if err != nil {
+		return schema, nil, err
+	}
+	for i := 0; i < int(num); i++ {
+		target, err := readCustomTarget(b)
+		if err != nil {
+			return schema, nil, err
+		}
+
+		quantileTargets = append(quantileTargets, target)
+	}
+	return schema, quantileTargets, nil
+}
+
+func readCustomTarget(br *bstreamReader) (float64, error) {
+	b, err := readVarbitUint(br)
+	if err != nil {
+		return 0, err
+	}
+	switch b {
+	case 0:
+		v, err := br.readBits(64)
+		if err != nil {
+			return 0, err
+		}
+		return math.Float64frombits(v), nil
+	default:
+		return float64(b-1) / 1000, nil
+	}
+}
+
 func putHistogramChunkLayoutSpans(b *bstream, spans []histogram.Span) {
 	putVarbitUint(b, uint64(len(spans)))
 	for _, s := range spans {

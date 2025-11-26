@@ -212,7 +212,7 @@ func (v ValueType) NewChunk() (Chunk, error) {
 	case ValFloatHistogram:
 		return NewFloatHistogramChunk(), nil
 	case ValNativeSummary:
-		return NewNativeSummaryChunk(), nil
+		return NewnativeSummaryChunk(), nil
 	default:
 		return nil, fmt.Errorf("value type %v unsupported", v)
 	}
@@ -398,7 +398,7 @@ func NewEmptyChunk(e Encoding) (Chunk, error) {
 	case EncFloatHistogram:
 		return NewFloatHistogramChunk(), nil
 	case EncNativeSummary:
-		return NewNativeSummaryChunk(), nil
+		return NewnativeSummaryChunk(), nil
 	}
 	return nil, fmt.Errorf("invalid chunk encoding %q", e)
 }
