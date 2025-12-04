@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	dto "github.com/prometheus/prometheus/prompb/io/prometheus/client"
 	"github.com/prometheus/prometheus/schema"
 	"github.com/prometheus/prometheus/util/convertnhcb"
@@ -287,6 +288,10 @@ func (p *ProtobufParser) Histogram() ([]byte, *int64, *histogram.Histogram, *his
 	return p.entryBytes.Bytes(), nil, &sh, nil
 }
 
+func (p *ProtobufParser) Summary() ([]byte, *int64, *summary.Summary) {
+	return nil, nil, nil
+}
+
 // Help returns the metric name and help text in the current entry.
 // Must only be called after Next returned a help entry.
 // The returned byte slices become invalid after the next call to Next.
@@ -484,14 +489,21 @@ func (p *ProtobufParser) Next() (Entry, error) {
 		p.state = EntryType
 	case EntryType:
 		t := p.dec.GetType()
-		if t == dto.MetricType_HISTOGRAM || t == dto.MetricType_GAUGE_HISTOGRAM {
+		switch t {
+		case dto.MetricType_HISTOGRAM, dto.MetricType_GAUGE_HISTOGRAM:
 			if p.ignoreNativeHistograms || !isNativeHistogram(p.dec.GetHistogram()) {
 				p.state = EntrySeries
 				p.fieldPos = -3 // We have not returned anything, let p.Next() increment it to -2.
 				return p.Next()
 			}
 			p.state = EntryHistogram
-		} else {
+		case dto.MetricType_SUMMARY:
+			if !p.convertClassicSummariesToNS {
+				p.state = EntrySeries
+				return p.Next()
+			}
+			p.state = EntrySummary
+		default:
 			p.state = EntrySeries
 		}
 		if err := p.onSeriesOrHistogramUpdate(); err != nil {
@@ -594,6 +606,17 @@ func (p *ProtobufParser) Next() (Entry, error) {
 		if err := p.onSeriesOrHistogramUpdate(); err != nil {
 			return EntryInvalid, err
 		}
+	case EntrySummary:
+		slog.Debug("inside Next() and EntrySummary", slog.Int("fieldPos", p.fieldPos))
+		if err := p.dec.NextMetric(); err != nil {
+			if errors.Is(err, io.EOF) {
+				p.state = EntryInvalid
+				return p.Next()
+			}
+			return EntryInvalid, err
+		}
+		p.state = EntryType
+		return p.Next()
 	default:
 		return EntryInvalid, fmt.Errorf("invalid protobuf parsing state: %d", p.state)
 	}

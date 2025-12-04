@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 // Parser parses samples from a byte slice of samples in different exposition formats.
@@ -43,6 +44,7 @@ type Parser interface {
 	// a valid timestamp. If needed it can be represented as 0+1ms.
 	Histogram() ([]byte, *int64, *histogram.Histogram, *histogram.FloatHistogram)
 
+	Summary() ([]byte, *int64, *summary.Summary)
 	// Help returns the metric name and help text in the current entry.
 	// Must only be called after Next returned a help entry.
 	// The returned byte slices become invalid after the next call to Next.
@@ -216,4 +218,5 @@ const (
 	EntryComment   Entry = 3
 	EntryUnit      Entry = 4
 	EntryHistogram Entry = 5 // EntryHistogram marks a series with a native histogram as a value.
+	EntrySummary   Entry = 6 // EntrySummary marks a series with a native summary as a value.
 )

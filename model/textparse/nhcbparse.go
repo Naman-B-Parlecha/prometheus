@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/util/convertnhcb"
 )
 
@@ -121,6 +122,11 @@ func (p *NHCBParser) Histogram() ([]byte, *int64, *histogram.Histogram, *histogr
 		return p.bytesNHCB, p.ts, p.hNHCB, p.fhNHCB
 	}
 	return p.bytes, p.ts, p.h, p.fh
+}
+
+// does not support native summary.
+func (*NHCBParser) Summary() ([]byte, *int64, *summary.Summary) {
+	return nil, nil, nil
 }
 
 func (p *NHCBParser) Help() ([]byte, []byte) {

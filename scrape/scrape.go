@@ -1717,13 +1717,13 @@ func (sl *scrapeLoop) append(app storage.Appender, b []byte, contentType string,
 loop:
 	for {
 		var (
-			et                       textparse.Entry
-			sampleAdded, isHistogram bool
-			met                      []byte
-			parsedTimestamp          *int64
-			val                      float64
-			h                        *histogram.Histogram
-			fh                       *histogram.FloatHistogram
+			et                                  textparse.Entry
+			sampleAdded, isHistogram, isSummary bool
+			met                                 []byte
+			parsedTimestamp                     *int64
+			val                                 float64
+			h                                   *histogram.Histogram
+			fh                                  *histogram.FloatHistogram
 		)
 		if et, err = p.Next(); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -1749,6 +1749,8 @@ loop:
 			continue
 		case textparse.EntryHistogram:
 			isHistogram = true
+		case textparse.EntrySummary:
+			isSummary = true
 		default:
 		}
 		total++
@@ -1756,6 +1758,8 @@ loop:
 		t := defTime
 		if isHistogram {
 			met, parsedTimestamp, h, fh = p.Histogram()
+		} else if isSummary {
+			met, parsedTimestamp, _ = p.Summary()
 		} else {
 			met, parsedTimestamp, val = p.Series()
 		}
