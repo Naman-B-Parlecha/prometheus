@@ -121,21 +121,22 @@ type labelLimits struct {
 }
 
 type scrapeLoopOptions struct {
-	target                   *Target
-	scraper                  scraper
-	sampleLimit              int
-	bucketLimit              int
-	maxSchema                int32
-	labelLimits              *labelLimits
-	honorLabels              bool
-	honorTimestamps          bool
-	trackTimestampsStaleness bool
-	interval                 time.Duration
-	timeout                  time.Duration
-	scrapeNativeHist         bool
-	alwaysScrapeClassicHist  bool
-	convertClassicHistToNHCB bool
-	fallbackScrapeProtocol   string
+	target                      *Target
+	scraper                     scraper
+	sampleLimit                 int
+	bucketLimit                 int
+	maxSchema                   int32
+	labelLimits                 *labelLimits
+	honorLabels                 bool
+	honorTimestamps             bool
+	trackTimestampsStaleness    bool
+	interval                    time.Duration
+	timeout                     time.Duration
+	scrapeNativeHist            bool
+	alwaysScrapeClassicHist     bool
+	convertClassicHistToNHCB    bool
+	fallbackScrapeProtocol      string
+	convertClassicSummariesToNS bool
 
 	mrc               []*relabel.Config
 	cache             *scrapeCache
@@ -226,6 +227,7 @@ func newScrapePool(cfg *config.ScrapeConfig, app storage.Appendable, offsetSeed 
 			sp.validationScheme,
 			sp.escapingScheme,
 			opts.fallbackScrapeProtocol,
+			opts.convertClassicSummariesToNS,
 		)
 	}
 	sp.metrics.targetScrapePoolTargetLimit.WithLabelValues(sp.config.JobName).Set(float64(sp.config.TargetLimit))
@@ -368,15 +370,16 @@ func (sp *scrapePool) restartLoops(reuseCache bool) {
 			labelNameLengthLimit:  int(sp.config.LabelNameLengthLimit),
 			labelValueLengthLimit: int(sp.config.LabelValueLengthLimit),
 		}
-		honorLabels              = sp.config.HonorLabels
-		honorTimestamps          = sp.config.HonorTimestamps
-		enableCompression        = sp.config.EnableCompression
-		trackTimestampsStaleness = sp.config.TrackTimestampsStaleness
-		mrc                      = sp.config.MetricRelabelConfigs
-		fallbackScrapeProtocol   = sp.config.ScrapeFallbackProtocol.HeaderMediaType()
-		scrapeNativeHist         = sp.config.ScrapeNativeHistogramsEnabled()
-		alwaysScrapeClassicHist  = sp.config.AlwaysScrapeClassicHistogramsEnabled()
-		convertClassicHistToNHCB = sp.config.ConvertClassicHistogramsToNHCBEnabled()
+		honorLabels                 = sp.config.HonorLabels
+		honorTimestamps             = sp.config.HonorTimestamps
+		enableCompression           = sp.config.EnableCompression
+		trackTimestampsStaleness    = sp.config.TrackTimestampsStaleness
+		mrc                         = sp.config.MetricRelabelConfigs
+		fallbackScrapeProtocol      = sp.config.ScrapeFallbackProtocol.HeaderMediaType()
+		scrapeNativeHist            = sp.config.ScrapeNativeHistogramsEnabled()
+		alwaysScrapeClassicHist     = sp.config.AlwaysScrapeClassicHistogramsEnabled()
+		convertClassicHistToNHCB    = sp.config.ConvertClassicHistogramsToNHCBEnabled()
+		convertClassicSummariesToNS = sp.config.ConvertClassicSummariesToNSEnabled()
 	)
 
 	sp.targetMtx.Lock()
@@ -404,24 +407,25 @@ func (sp *scrapePool) restartLoops(reuseCache bool) {
 				metrics:              sp.metrics,
 			}
 			newLoop = sp.newLoop(scrapeLoopOptions{
-				target:                   t,
-				scraper:                  s,
-				sampleLimit:              sampleLimit,
-				bucketLimit:              bucketLimit,
-				maxSchema:                maxSchema,
-				labelLimits:              labelLimits,
-				honorLabels:              honorLabels,
-				honorTimestamps:          honorTimestamps,
-				enableCompression:        enableCompression,
-				trackTimestampsStaleness: trackTimestampsStaleness,
-				mrc:                      mrc,
-				cache:                    cache,
-				interval:                 targetInterval,
-				timeout:                  targetTimeout,
-				fallbackScrapeProtocol:   fallbackScrapeProtocol,
-				scrapeNativeHist:         scrapeNativeHist,
-				alwaysScrapeClassicHist:  alwaysScrapeClassicHist,
-				convertClassicHistToNHCB: convertClassicHistToNHCB,
+				target:                      t,
+				scraper:                     s,
+				sampleLimit:                 sampleLimit,
+				bucketLimit:                 bucketLimit,
+				maxSchema:                   maxSchema,
+				labelLimits:                 labelLimits,
+				honorLabels:                 honorLabels,
+				honorTimestamps:             honorTimestamps,
+				enableCompression:           enableCompression,
+				trackTimestampsStaleness:    trackTimestampsStaleness,
+				mrc:                         mrc,
+				cache:                       cache,
+				interval:                    targetInterval,
+				timeout:                     targetTimeout,
+				fallbackScrapeProtocol:      fallbackScrapeProtocol,
+				scrapeNativeHist:            scrapeNativeHist,
+				alwaysScrapeClassicHist:     alwaysScrapeClassicHist,
+				convertClassicHistToNHCB:    convertClassicHistToNHCB,
+				convertClassicSummariesToNS: convertClassicSummariesToNS,
 			})
 		)
 		if err != nil {
@@ -529,15 +533,16 @@ func (sp *scrapePool) sync(targets []*Target) {
 			labelNameLengthLimit:  int(sp.config.LabelNameLengthLimit),
 			labelValueLengthLimit: int(sp.config.LabelValueLengthLimit),
 		}
-		honorLabels              = sp.config.HonorLabels
-		honorTimestamps          = sp.config.HonorTimestamps
-		enableCompression        = sp.config.EnableCompression
-		trackTimestampsStaleness = sp.config.TrackTimestampsStaleness
-		mrc                      = sp.config.MetricRelabelConfigs
-		fallbackScrapeProtocol   = sp.config.ScrapeFallbackProtocol.HeaderMediaType()
-		scrapeNativeHist         = sp.config.ScrapeNativeHistogramsEnabled()
-		alwaysScrapeClassicHist  = sp.config.AlwaysScrapeClassicHistogramsEnabled()
-		convertClassicHistToNHCB = sp.config.ConvertClassicHistogramsToNHCBEnabled()
+		honorLabels                 = sp.config.HonorLabels
+		honorTimestamps             = sp.config.HonorTimestamps
+		enableCompression           = sp.config.EnableCompression
+		trackTimestampsStaleness    = sp.config.TrackTimestampsStaleness
+		mrc                         = sp.config.MetricRelabelConfigs
+		fallbackScrapeProtocol      = sp.config.ScrapeFallbackProtocol.HeaderMediaType()
+		scrapeNativeHist            = sp.config.ScrapeNativeHistogramsEnabled()
+		alwaysScrapeClassicHist     = sp.config.AlwaysScrapeClassicHistogramsEnabled()
+		convertClassicHistToNHCB    = sp.config.ConvertClassicHistogramsToNHCBEnabled()
+		convertClassicSummariesToNS = sp.config.ConvertClassicSummariesToNSEnabled()
 	)
 
 	sp.targetMtx.Lock()
@@ -560,23 +565,24 @@ func (sp *scrapePool) sync(targets []*Target) {
 				metrics:              sp.metrics,
 			}
 			l := sp.newLoop(scrapeLoopOptions{
-				target:                   t,
-				scraper:                  s,
-				sampleLimit:              sampleLimit,
-				bucketLimit:              bucketLimit,
-				maxSchema:                maxSchema,
-				labelLimits:              labelLimits,
-				honorLabels:              honorLabels,
-				honorTimestamps:          honorTimestamps,
-				enableCompression:        enableCompression,
-				trackTimestampsStaleness: trackTimestampsStaleness,
-				mrc:                      mrc,
-				interval:                 interval,
-				timeout:                  timeout,
-				scrapeNativeHist:         scrapeNativeHist,
-				alwaysScrapeClassicHist:  alwaysScrapeClassicHist,
-				convertClassicHistToNHCB: convertClassicHistToNHCB,
-				fallbackScrapeProtocol:   fallbackScrapeProtocol,
+				target:                      t,
+				scraper:                     s,
+				sampleLimit:                 sampleLimit,
+				bucketLimit:                 bucketLimit,
+				maxSchema:                   maxSchema,
+				labelLimits:                 labelLimits,
+				honorLabels:                 honorLabels,
+				honorTimestamps:             honorTimestamps,
+				enableCompression:           enableCompression,
+				trackTimestampsStaleness:    trackTimestampsStaleness,
+				mrc:                         mrc,
+				interval:                    interval,
+				timeout:                     timeout,
+				scrapeNativeHist:            scrapeNativeHist,
+				alwaysScrapeClassicHist:     alwaysScrapeClassicHist,
+				convertClassicHistToNHCB:    convertClassicHistToNHCB,
+				fallbackScrapeProtocol:      fallbackScrapeProtocol,
+				convertClassicSummariesToNS: convertClassicSummariesToNS,
 			})
 			if err != nil {
 				l.setForcedError(err)
@@ -953,11 +959,12 @@ type scrapeLoop struct {
 	validationScheme         model.ValidationScheme
 	escapingScheme           model.EscapingScheme
 
-	alwaysScrapeClassicHist  bool
-	convertClassicHistToNHCB bool
-	enableSTZeroIngestion    bool
-	enableTypeAndUnitLabels  bool
-	fallbackScrapeProtocol   string
+	alwaysScrapeClassicHist     bool
+	convertClassicHistToNHCB    bool
+	convertClassicSummariesToNS bool
+	enableSTZeroIngestion       bool
+	enableTypeAndUnitLabels     bool
+	fallbackScrapeProtocol      string
 
 	enableNativeHistogramScraping bool
 
@@ -1273,6 +1280,7 @@ func newScrapeLoop(ctx context.Context,
 	validationScheme model.ValidationScheme,
 	escapingScheme model.EscapingScheme,
 	fallbackScrapeProtocol string,
+	convertClassicSummariesToNS bool,
 ) *scrapeLoop {
 	if l == nil {
 		l = promslog.NewNopLogger()
@@ -1329,6 +1337,7 @@ func newScrapeLoop(ctx context.Context,
 		skipOffsetting:                skipOffsetting,
 		validationScheme:              validationScheme,
 		escapingScheme:                escapingScheme,
+		convertClassicSummariesToNS:   convertClassicSummariesToNS,
 	}
 	sl.ctx, sl.cancel = context.WithCancel(ctx)
 
@@ -1663,6 +1672,7 @@ func (sl *scrapeLoop) append(app storage.Appender, b []byte, contentType string,
 		KeepClassicOnClassicAndNativeHistograms: sl.alwaysScrapeClassicHist,
 		OpenMetricsSkipSTSeries:                 sl.enableSTZeroIngestion,
 		FallbackContentType:                     sl.fallbackScrapeProtocol,
+		ConvertClassicSummariesToNS:             sl.convertClassicSummariesToNS,
 	})
 	if p == nil {
 		sl.l.Error(

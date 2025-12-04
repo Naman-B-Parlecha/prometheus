@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"unicode/utf8"
 
@@ -80,16 +81,20 @@ type ProtobufParser struct {
 	// We need to preload NHCB since we cannot do error handling in Histogram().
 	nhcbH  *histogram.Histogram
 	nhcbFH *histogram.FloatHistogram
+
+	// Whether to convert classic summaries to native summaries.
+	convertClassicSummariesToNS bool
 }
 
 // NewProtobufParser returns a parser for the payload in the byte slice.
 func NewProtobufParser(
 	b []byte,
-	ignoreNativeHistograms, parseClassicHistograms, convertClassicHistogramsToNHCB, enableTypeAndUnitLabels bool,
+	ignoreNativeHistograms, parseClassicHistograms, convertClassicHistogramsToNHCB, enableTypeAndUnitLabels, convertClassicSummariesToNS bool,
 	st *labels.SymbolTable,
 ) Parser {
 	builder := labels.NewScratchBuilderWithSymbolTable(st, 16)
 	builder.SetUnsafeAdd(true)
+	slog.Debug("convertClassicSummariesToNS in ProtobufParser", slog.Any("convertClassicSummariesToNS", convertClassicSummariesToNS))
 	return &ProtobufParser{
 		dec:        dto.NewMetricStreamingDecoder(b),
 		entryBytes: &bytes.Buffer{},
@@ -100,6 +105,7 @@ func NewProtobufParser(
 		parseClassicHistograms:         parseClassicHistograms,
 		enableTypeAndUnitLabels:        enableTypeAndUnitLabels,
 		convertClassicHistogramsToNHCB: convertClassicHistogramsToNHCB,
+		convertClassicSummariesToNS:    convertClassicSummariesToNS,
 		tmpNHCB:                        convertnhcb.NewTempHistogram(),
 	}
 }

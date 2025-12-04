@@ -153,6 +153,10 @@ type ParserOptions struct {
 	// FallbackContentType specifies the fallback content type to use when the provided
 	// Content-Type header cannot be parsed or is not supported.
 	FallbackContentType string
+
+	// ConvertClassicSummariesToNS enables conversion of classic summaries
+	// to native summaries (NS).
+	ConvertClassicSummariesToNS bool
 }
 
 // New returns a new parser of the byte slice.
@@ -185,6 +189,7 @@ func New(b []byte, contentType string, st *labels.SymbolTable, opts ParserOption
 			opts.KeepClassicOnClassicAndNativeHistograms,
 			opts.ConvertClassicHistogramsToNHCB,
 			opts.EnableTypeAndUnitLabels,
+			opts.ConvertClassicSummariesToNS,
 			st,
 		), err
 	case "text/plain":
