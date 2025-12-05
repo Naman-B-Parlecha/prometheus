@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -296,6 +297,7 @@ type Appender interface {
 	HistogramAppender
 	MetadataUpdater
 	StartTimestampAppender
+	SummaryAppender
 }
 
 // GetRef is an extra interface on Appenders used by downstream projects
@@ -353,6 +355,12 @@ type HistogramAppender interface {
 	//
 	// If the reference is 0 it must not be used for caching.
 	AppendHistogramSTZeroSample(ref SeriesRef, l labels.Labels, t, st int64, h *histogram.Histogram, fh *histogram.FloatHistogram) (SeriesRef, error)
+}
+
+type SummaryAppender interface {
+	AppendSummary(ref SeriesRef, l labels.Labels, t int64, s *summary.Summary) (SeriesRef, error)
+
+	AppendSummarySTZeroSample(ref SeriesRef, l labels.Labels, t, st int64, s *summary.Summary) (SeriesRef, error)
 }
 
 // MetadataUpdater provides an interface for associating metadata to stored series.

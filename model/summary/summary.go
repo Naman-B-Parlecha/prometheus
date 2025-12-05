@@ -9,7 +9,7 @@ var (
 
 type Summary struct {
 	// Total number of observations.
-	Count float64
+	Count uint64
 	// Sum of observations.
 	Sum float64
 	// Holds the calculated quantile values for configured quantile targets in sorted order.

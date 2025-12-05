@@ -289,7 +289,32 @@ func (p *ProtobufParser) Histogram() ([]byte, *int64, *histogram.Histogram, *his
 }
 
 func (p *ProtobufParser) Summary() ([]byte, *int64, *summary.Summary) {
-	return nil, nil, nil
+	slog.Debug("Inside Summary Interface of parser")
+	var (
+		ts = &p.dec.TimestampMs // To save memory allocations, never nil.
+		s  = p.dec.GetSummary()
+	)
+	ns := summary.Summary{
+		Count:           s.GetSampleCount(),
+		Sum:             s.GetSampleSum(),
+		QuantileValues:  make([]float64, len(s.GetQuantile())),
+		QuantileTargets: make([]float64, len(s.GetQuantile())),
+	}
+	for i, q := range s.GetQuantile() {
+		ns.QuantileTargets[i] = q.GetQuantile()
+		ns.QuantileValues[i] = q.GetValue()
+	}
+	err := ns.Validate()
+	if err != nil {
+		slog.Warn("invalid summary encountered in protobuf parser", slog.String("metric", p.dec.GetName()), slog.Any("err", err))
+	}
+	if *ts != 0 {
+		slog.Debug("Inside Summary Interface of parser with ts returning")
+		return p.entryBytes.Bytes(), ts, &ns
+	}
+	slog.Debug("ns stucture", slog.Any("ns", ns))
+	slog.Debug("Inside Summary Interface of parser without ts returning")
+	return p.entryBytes.Bytes(), nil, &ns
 }
 
 // Help returns the metric name and help text in the current entry.

@@ -1724,6 +1724,7 @@ loop:
 			val                                 float64
 			h                                   *histogram.Histogram
 			fh                                  *histogram.FloatHistogram
+			// s                                   *summary.Summary
 		)
 		if et, err = p.Next(); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -1759,6 +1760,7 @@ loop:
 		if isHistogram {
 			met, parsedTimestamp, h, fh = p.Histogram()
 		} else if isSummary {
+			sl.l.Debug("inside append and isSummary true", "convertClassicSummariesToNS", sl.convertClassicSummariesToNS)
 			met, parsedTimestamp, _ = p.Summary()
 		} else {
 			met, parsedTimestamp, val = p.Series()
@@ -1824,6 +1826,8 @@ loop:
 						} else {
 							ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, nil, fh)
 						}
+					} else if isSummary {
+						ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, nil, fh)
 					} else {
 						ref, err = app.AppendSTZeroSample(ref, lset, t, stMs)
 					}

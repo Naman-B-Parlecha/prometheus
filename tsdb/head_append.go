@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -111,6 +112,26 @@ func (a *initAppender) AppendSTZeroSample(ref storage.SeriesRef, lset labels.Lab
 	a.app = a.head.appender()
 
 	return a.app.AppendSTZeroSample(ref, lset, t, st)
+}
+
+func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	if a.app != nil {
+		return a.app.AppendSummary(ref, l, t, s)
+	}
+	a.head.initTime(t)
+	a.app = a.head.appender()
+	return a.app.AppendSummary(ref, l, t, s)
+}
+
+func (a *initAppender) AppendSummarySTZeroSample(ref storage.SeriesRef, l labels.Labels, t, st int64, s *summary.Summary) (storage.SeriesRef, error) {
+	if a.app != nil {
+		return a.app.AppendSummarySTZeroSample(ref, l, t, st, s)
+	}
+
+	a.head.initTime(t)
+	a.app = a.head.appender()
+
+	return a.app.AppendSummarySTZeroSample(ref, l, t, st, s)
 }
 
 // initTime initializes a head with the first timestamp. This only needs to be called
@@ -1007,6 +1028,14 @@ func (a *headAppender) AppendHistogramSTZeroSample(ref storage.SeriesRef, lset l
 	}
 
 	return storage.SeriesRef(s.ref), nil
+}
+
+func (a *headAppender) AppendSummary(ref storage.SeriesRef, lset labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
+func (a *headAppender) AppendSummarySTZeroSample(ref storage.SeriesRef, lset labels.Labels, t, st int64, s *summary.Summary) (storage.SeriesRef, error) {
+	return 0, fmt.Errorf("not implemented")
 }
 
 // UpdateMetadata for headAppender assumes the series ref already exists, and so it doesn't

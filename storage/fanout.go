@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	tsdb_errors "github.com/prometheus/prometheus/tsdb/errors"
 )
 
@@ -207,6 +208,34 @@ func (f *fanoutAppender) AppendHistogramSTZeroSample(ref SeriesRef, l labels.Lab
 
 	for _, appender := range f.secondaries {
 		if _, err := appender.AppendHistogramSTZeroSample(ref, l, t, st, h, fh); err != nil {
+			return 0, err
+		}
+	}
+	return ref, nil
+}
+
+func (f *fanoutAppender) AppendSummary(ref SeriesRef, l labels.Labels, ts int64, s *summary.Summary) (SeriesRef, error) {
+	ref, err := f.primary.AppendSummary(ref, l, ts, s)
+	if err != nil {
+		return ref, err
+	}
+
+	for _, appender := range f.secondaries {
+		if _, err := appender.AppendSummary(ref, l, ts, s); err != nil {
+			return 0, err
+		}
+	}
+	return ref, nil
+}
+
+func (f *fanoutAppender) AppendSummarySTZeroSample(ref SeriesRef, l labels.Labels, t, st int64, s *summary.Summary) (SeriesRef, error) {
+	ref, err := f.primary.AppendSummarySTZeroSample(ref, l, t, st, s)
+	if err != nil {
+		return ref, err
+	}
+
+	for _, appender := range f.secondaries {
+		if _, err := appender.AppendSummarySTZeroSample(ref, l, t, st, s); err != nil {
 			return 0, err
 		}
 	}
