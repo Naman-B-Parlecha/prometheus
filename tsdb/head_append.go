@@ -1256,6 +1256,20 @@ func (a *headAppender) log() error {
 				}
 			}
 		}
+		slog.Debug("inside log", slog.Any("summary size", b.summaries))
+		if len(b.summariesSeries) > 0 {
+			slog.Debug("b.summariesSeries")
+			rec = enc.SummarySamples(b.summaries, buf)
+			slog.Debug("enc.SummarySamples(b.summaries, buf)", slog.Any("rec", rec), slog.Any("buf", buf))
+			buf = rec[:0]
+			slog.Debug("enc.SummarySamples(b.summaries, buf)", slog.Any("rec", rec), slog.Any("buf", buf))
+			if len(rec) > 0 {
+				slog.Debug("logging")
+				if err := a.head.wal.Log(rec); err != nil {
+					return fmt.Errorf("log summary: %w", err)
+				}
+			}
+		}
 		// Exemplars should be logged after samples (float/native histogram/etc),
 		// otherwise it might happen that we send the exemplars in a remote write
 		// batch before the samples, which in turn means the exemplar is rejected
