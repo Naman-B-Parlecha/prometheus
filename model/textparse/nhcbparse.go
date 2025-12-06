@@ -124,7 +124,7 @@ func (p *NHCBParser) Histogram() ([]byte, *int64, *histogram.Histogram, *histogr
 	return p.bytes, p.ts, p.h, p.fh
 }
 
-// does not support native summary.
+// Summary does not support native summary.
 func (*NHCBParser) Summary() ([]byte, *int64, *summary.Summary) {
 	return nil, nil, nil
 }

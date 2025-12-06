@@ -312,7 +312,7 @@ func (p *ProtobufParser) Summary() ([]byte, *int64, *summary.Summary) {
 		slog.Debug("Inside Summary Interface of parser with ts returning")
 		return p.entryBytes.Bytes(), ts, &ns
 	}
-	slog.Debug("ns stucture", slog.Any("ns", ns))
+	slog.Debug("ns structure", slog.Any("ns", ns))
 	slog.Debug("Inside Summary Interface of parser without ts returning")
 	return p.entryBytes.Bytes(), nil, &ns
 }
@@ -525,6 +525,7 @@ func (p *ProtobufParser) Next() (Entry, error) {
 		case dto.MetricType_SUMMARY:
 			if !p.convertClassicSummariesToNS {
 				p.state = EntrySeries
+				p.fieldPos = -3 // We have not returned anything, let p.Next() increment it to -2.
 				return p.Next()
 			}
 			p.state = EntrySummary

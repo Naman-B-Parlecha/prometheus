@@ -1758,12 +1758,13 @@ loop:
 		total++
 
 		t := defTime
-		if isHistogram {
+		switch {
+		case isHistogram:
 			met, parsedTimestamp, h, fh = p.Histogram()
-		} else if isSummary {
+		case isSummary:
 			sl.l.Debug("inside append and isSummary true", "convertClassicSummariesToNS", sl.convertClassicSummariesToNS)
 			met, parsedTimestamp, s = p.Summary()
-		} else {
+		default:
 			met, parsedTimestamp, val = p.Series()
 		}
 		if !sl.honorTimestamps {
@@ -1821,15 +1822,16 @@ loop:
 		} else {
 			if sl.enableSTZeroIngestion {
 				if stMs := p.StartTimestamp(); stMs != 0 {
-					if isHistogram {
+					switch {
+					case isHistogram:
 						if h != nil {
 							ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, h, nil)
 						} else {
 							ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, nil, fh)
 						}
-					} else if isSummary {
+					case isSummary:
 						ref, err = app.AppendSummarySTZeroSample(ref, lset, t, stMs, s)
-					} else {
+					default:
 						ref, err = app.AppendSTZeroSample(ref, lset, t, stMs)
 					}
 					if err != nil && !errors.Is(err, storage.ErrOutOfOrderST) { // OOO is a common case, ignoring completely for now.
@@ -1840,16 +1842,17 @@ loop:
 				}
 			}
 
-			if isHistogram {
+			switch {
+			case isHistogram:
 				if h != nil {
 					ref, err = app.AppendHistogram(ref, lset, t, h, nil)
 				} else {
 					ref, err = app.AppendHistogram(ref, lset, t, nil, fh)
 				}
-			} else if isSummary {
+			case isSummary:
 				sl.l.Debug("inside the else if of append to storage")
 				ref, err = app.AppendSummary(ref, lset, t, s)
-			} else {
+			default:
 				ref, err = app.Append(ref, lset, t, val)
 			}
 		}

@@ -1059,15 +1059,12 @@ func (a *headAppender) AppendSummary(ref storage.SeriesRef, lset labels.Labels, 
 	}
 
 	ms.Lock()
-	_, delta, err := ms.appendableSummary(t, s, a.headMaxt, a.minValidTime, a.oooTimeWindow)
+	_, _, err := ms.appendableSummary(t, s, a.headMaxt, a.minValidTime, a.oooTimeWindow)
 	if err == nil {
 		ms.pendingCommit = true
 	}
 	ms.Unlock()
-	if delta > 0 {
-		// TODO(Naman): Check if we need to add summary type
-		// a.head.metrics.oooHistogram.Observe(float64(delta) / 1000)
-	}
+	// TODO(Naman): Check if we need to add summary type for OOO metrics
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrOutOfOrderSample):
@@ -1096,24 +1093,24 @@ func (a *headAppender) AppendSummary(ref storage.SeriesRef, lset labels.Labels, 
 	return storage.SeriesRef(ms.ref), nil
 }
 
-func (ms *memSeries) appendableSummary(t int64, s *summary.Summary, headMaxt, minValidTime, oooTimeWindow int64) (isOOO bool, oooDelta int64, err error) {
+func (s *memSeries) appendableSummary(t int64, sum *summary.Summary, headMaxt, minValidTime, oooTimeWindow int64) (isOOO bool, oooDelta int64, err error) {
 	// Check if we can append in the in-order chunk.
 	if t >= minValidTime {
-		if ms.headChunks == nil {
+		if s.headChunks == nil {
 			// The series has no sample and was freshly created.
 			return false, 0, nil
 		}
-		msMaxt := ms.maxTime()
-		if t > msMaxt {
+		sMaxt := s.maxTime()
+		if t > sMaxt {
 			return false, 0, nil
 		}
-		slog.Debug("appendable", slog.Any("ms.lastSummaryValue", ms.lastSummaryValue))
-		if t == msMaxt {
+		slog.Debug("appendable", slog.Any("s.lastSummaryValue", s.lastSummaryValue))
+		if t == sMaxt {
 			// We are allowing exact duplicates as we can encounter them in valid cases
 			// like federation and erroring out at that time would be extremely noisy.
 			// This only checks against the latest in-order sample.
 			// The OOO headchunk has its own method to detect these duplicates.
-			if !s.Equals(ms.lastSummaryValue) {
+			if !sum.Equals(s.lastSummaryValue) {
 				return false, 0, storage.ErrDuplicateSampleForTimestamp
 			}
 			// Sample is identical (ts + value) with most current (highest ts) sample in sampleBuf.
@@ -1136,8 +1133,8 @@ func (ms *memSeries) appendableSummary(t int64, s *summary.Summary, headMaxt, mi
 	return false, headMaxt - t, storage.ErrOutOfOrderSample
 }
 
-func (a *headAppender) AppendSummarySTZeroSample(ref storage.SeriesRef, lset labels.Labels, t, st int64, s *summary.Summary) (storage.SeriesRef, error) {
-	return 0, fmt.Errorf("not implemented")
+func (*headAppender) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	return 0, errors.New("not implemented")
 }
 
 // UpdateMetadata for headAppender assumes the series ref already exists, and so it doesn't

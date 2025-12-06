@@ -1071,11 +1071,11 @@ func (a *appender) AppendHistogramSTZeroSample(ref storage.SeriesRef, l labels.L
 	return storage.SeriesRef(series.ref), nil
 }
 
-func (a *appender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+func (*appender) AppendSummary(_ storage.SeriesRef, _ labels.Labels, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
 	return 0, errors.New("not implemented")
 }
 
-func (a *appender) AppendSummarySTZeroSample(ref storage.SeriesRef, l labels.Labels, t, st int64, s *summary.Summary) (storage.SeriesRef, error) {
+func (*appender) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
 	return 0, errors.New("not implemented")
 }
 

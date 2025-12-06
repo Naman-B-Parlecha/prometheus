@@ -194,7 +194,7 @@ func (*PromParser) Histogram() ([]byte, *int64, *histogram.Histogram, *histogram
 	return nil, nil, nil, nil
 }
 
-// does not support native summary.
+// Summary does not support native summary.
 func (*PromParser) Summary() ([]byte, *int64, *summary.Summary) {
 	return nil, nil, nil
 }

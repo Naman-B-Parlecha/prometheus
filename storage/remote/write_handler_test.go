@@ -1474,11 +1474,11 @@ func (m *mockAppendable) AppendHistogramSTZeroSample(_ storage.SeriesRef, l labe
 	return storage.SeriesRef(hash), nil
 }
 
-func (m *mockAppendable) AppendSummary(_ storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+func (*mockAppendable) AppendSummary(_ storage.SeriesRef, _ labels.Labels, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
 	return 0, errors.New("not implemented")
 }
 
-func (m *mockAppendable) AppendSummarySTZeroSample(_ storage.SeriesRef, l labels.Labels, t, st int64, s *summary.Summary) (storage.SeriesRef, error) {
+func (*mockAppendable) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
 	return 0, errors.New("not implemented")
 }
 

@@ -177,7 +177,7 @@ func (*OpenMetricsParser) Histogram() ([]byte, *int64, *histogram.Histogram, *hi
 	return nil, nil, nil, nil
 }
 
-// does not support native summary.
+// Summary does not support native summary.
 func (*OpenMetricsParser) Summary() ([]byte, *int64, *summary.Summary) {
 	return nil, nil, nil
 }
