@@ -26,6 +26,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/tsdb/encoding"
@@ -193,6 +194,12 @@ type RefFloatHistogramSample struct {
 	Ref chunks.HeadSeriesRef
 	T   int64
 	FH  *histogram.FloatHistogram
+}
+
+type RefSummarySample struct {
+	Ref chunks.HeadSeriesRef
+	T   int64
+	S   *summary.Summary
 }
 
 // RefMmapMarker marks that the all the samples of the given series until now have been m-mapped to disk.

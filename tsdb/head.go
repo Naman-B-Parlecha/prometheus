@@ -36,6 +36,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -394,6 +395,7 @@ type headMetrics struct {
 const (
 	sampleMetricTypeFloat     = "float"
 	sampleMetricTypeHistogram = "histogram"
+	sampleMetricTypeSummary   = "summary"
 )
 
 func newHeadMetrics(h *Head, r prometheus.Registerer) *headMetrics {
@@ -2169,6 +2171,7 @@ type memSeries struct {
 	lastHistogramValue      *histogram.Histogram
 	lastFloatHistogramValue *histogram.FloatHistogram
 
+	lastSummaryValue *summary.Summary
 	// Current appender for the head chunk. Set when a new head chunk is cut.
 	// It is nil only if headChunks is nil. E.g. if there was an appender that created a new series, but rolled back the commit
 	// (the first sample would create a headChunk, hence appender, but rollback skipped it while the Append() call would create a series).

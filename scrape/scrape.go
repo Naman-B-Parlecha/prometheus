@@ -50,6 +50,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/relabel"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/model/value"
@@ -1724,7 +1725,7 @@ loop:
 			val                                 float64
 			h                                   *histogram.Histogram
 			fh                                  *histogram.FloatHistogram
-			// s                                   *summary.Summary
+			s                                   *summary.Summary
 		)
 		if et, err = p.Next(); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -1761,7 +1762,7 @@ loop:
 			met, parsedTimestamp, h, fh = p.Histogram()
 		} else if isSummary {
 			sl.l.Debug("inside append and isSummary true", "convertClassicSummariesToNS", sl.convertClassicSummariesToNS)
-			met, parsedTimestamp, _ = p.Summary()
+			met, parsedTimestamp, s = p.Summary()
 		} else {
 			met, parsedTimestamp, val = p.Series()
 		}
@@ -1827,7 +1828,7 @@ loop:
 							ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, nil, fh)
 						}
 					} else if isSummary {
-						ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, nil, fh)
+						ref, err = app.AppendSummarySTZeroSample(ref, lset, t, stMs, s)
 					} else {
 						ref, err = app.AppendSTZeroSample(ref, lset, t, stMs)
 					}
@@ -1845,6 +1846,9 @@ loop:
 				} else {
 					ref, err = app.AppendHistogram(ref, lset, t, nil, fh)
 				}
+			} else if isSummary {
+				sl.l.Debug("inside the else if of append to storage")
+				ref, err = app.AppendSummary(ref, lset, t, s)
 			} else {
 				ref, err = app.Append(ref, lset, t, val)
 			}
@@ -1888,7 +1892,7 @@ loop:
 		exemplars = exemplars[:0] // Reset and reuse the exemplar slice.
 		for hasExemplar := p.Exemplar(&e); hasExemplar; hasExemplar = p.Exemplar(&e) {
 			if !e.HasTs {
-				if isHistogram {
+				if isHistogram || isSummary {
 					// We drop exemplars for native histograms if they don't have a timestamp.
 					// Missing timestamps are deliberately not supported as we want to start
 					// enforcing timestamps for exemplars as otherwise proper deduplication

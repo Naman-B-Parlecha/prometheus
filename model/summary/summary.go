@@ -1,6 +1,9 @@
 package summary
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 var (
 	// ErrInvalidSummary is returned when a summary is invalid.
@@ -31,4 +34,17 @@ func (s *Summary) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (s *Summary) Equals(s2 *Summary) bool {
+	if s2 == nil {
+		return false
+	}
+	if s.Count != s2.Count || s.Sum != s2.Sum {
+		return false
+	}
+	if !slices.Equal(s.QuantileValues, s2.QuantileValues) || !slices.Equal(s.QuantileTargets, s2.QuantileTargets) {
+		return false
+	}
+	return true
 }

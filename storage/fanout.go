@@ -215,6 +215,7 @@ func (f *fanoutAppender) AppendHistogramSTZeroSample(ref SeriesRef, l labels.Lab
 }
 
 func (f *fanoutAppender) AppendSummary(ref SeriesRef, l labels.Labels, ts int64, s *summary.Summary) (SeriesRef, error) {
+	slog.Debug("lol i m here")
 	ref, err := f.primary.AppendSummary(ref, l, ts, s)
 	if err != nil {
 		return ref, err
