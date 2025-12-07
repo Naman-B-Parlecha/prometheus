@@ -1037,7 +1037,7 @@ func (a *headAppender) AppendSummary(ref storage.SeriesRef, lset labels.Labels, 
 	// Fail fast if OOO is disabled and the sample is out of bounds.
 	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.
 	if a.oooTimeWindow == 0 && t < a.minValidTime {
-		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeHistogram).Inc()
+		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
 		return 0, storage.ErrOutOfBounds
 	}
 
