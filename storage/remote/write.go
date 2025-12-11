@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/wlog"
 )
@@ -288,6 +289,7 @@ type timestampTracker struct {
 	samples              int64
 	exemplars            int64
 	histograms           int64
+	summaries            int64
 	highestTimestamp     int64
 	highestRecvTimestamp *maxTimestamp
 }
@@ -330,6 +332,24 @@ func (t *timestampTracker) AppendSTZeroSample(_ storage.SeriesRef, _ labels.Labe
 
 func (t *timestampTracker) AppendHistogramSTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, st int64, _ *histogram.Histogram, _ *histogram.FloatHistogram) (storage.SeriesRef, error) {
 	t.histograms++
+	if st > t.highestTimestamp {
+		// Theoretically, we should never see a ST zero sample with a timestamp higher than the highest timestamp we've seen so far.
+		// However, we're not going to enforce that here, as it is not the responsibility of the tracker to enforce this.
+		t.highestTimestamp = st
+	}
+	return 0, nil
+}
+
+func (t *timestampTracker) AppendSummary(_ storage.SeriesRef, _ labels.Labels, ts int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	t.summaries++
+	if ts > t.highestTimestamp {
+		t.highestTimestamp = ts
+	}
+	return 0, nil
+}
+
+func (t *timestampTracker) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, st int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	t.summaries++
 	if st > t.highestTimestamp {
 		// Theoretically, we should never see a ST zero sample with a timestamp higher than the highest timestamp we've seen so far.
 		// However, we're not going to enforce that here, as it is not the responsibility of the tracker to enforce this.

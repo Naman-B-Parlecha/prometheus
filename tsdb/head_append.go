@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -111,6 +112,26 @@ func (a *initAppender) AppendSTZeroSample(ref storage.SeriesRef, lset labels.Lab
 	a.app = a.head.appender()
 
 	return a.app.AppendSTZeroSample(ref, lset, t, st)
+}
+
+func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	if a.app != nil {
+		return a.app.AppendSummary(ref, l, t, s)
+	}
+	a.head.initTime(t)
+	a.app = a.head.appender()
+	return a.app.AppendSummary(ref, l, t, s)
+}
+
+func (a *initAppender) AppendSummarySTZeroSample(ref storage.SeriesRef, l labels.Labels, t, st int64, s *summary.Summary) (storage.SeriesRef, error) {
+	if a.app != nil {
+		return a.app.AppendSummarySTZeroSample(ref, l, t, st, s)
+	}
+
+	a.head.initTime(t)
+	a.app = a.head.appender()
+
+	return a.app.AppendSummarySTZeroSample(ref, l, t, st, s)
 }
 
 // initTime initializes a head with the first timestamp. This only needs to be called
@@ -341,6 +362,7 @@ const (
 	stCustomBucketHistogram                        // Native integer histograms with custom bucket boundaries. Goes to `histograms`.
 	stFloatHistogram                               // Native float histograms. Goes to `floatHistograms`.
 	stCustomBucketFloatHistogram                   // Native float histograms with custom bucket boundaries. Goes to `floatHistograms`.
+	stSummaries
 )
 
 // appendBatch is used to partition all the appended data into batches that are
@@ -360,6 +382,8 @@ type appendBatch struct {
 	metadata             []record.RefMetadata             // New metadata held by this appender.
 	metadataSeries       []*memSeries                     // Series corresponding to the metadata held by this appender.
 	exemplars            []exemplarWithSeriesRef          // New exemplars held by this appender.
+	summariesSeries      []*memSeries
+	summaries            []record.RefSummarySample
 }
 
 // close returns all the slices to the pools in Head and nil's them.
@@ -1014,6 +1038,110 @@ func (a *headAppender) AppendHistogramSTZeroSample(ref storage.SeriesRef, lset l
 	return storage.SeriesRef(s.ref), nil
 }
 
+func (a *headAppender) AppendSummary(ref storage.SeriesRef, lset labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	// Fail fast if OOO is disabled and the sample is out of bounds.
+	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.
+	if a.oooTimeWindow == 0 && t < a.minValidTime {
+		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		return 0, storage.ErrOutOfBounds
+	}
+
+	if s != nil {
+		if err := s.Validate(); err != nil {
+			return 0, err
+		}
+	}
+
+	ms := a.head.series.getByID(chunks.HeadSeriesRef(ref))
+	slog.Debug("inside appendSummary of head", slog.Any("a.head.series.getByID", ms))
+	if ms == nil {
+		var err error
+		ms, _, err = a.getOrCreate(lset)
+		slog.Debug("a.head.series.getByID null so creating new", slog.Any("a.head.series.getOrCreate", ms))
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	ms.Lock()
+	_, _, err := ms.appendableSummary(t, s, a.headMaxt, a.minValidTime, a.oooTimeWindow)
+	if err == nil {
+		ms.pendingCommit = true
+	}
+	ms.Unlock()
+	// TODO(Naman): Check if we need to add summary type for OOO metrics
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrOutOfOrderSample):
+			a.head.metrics.outOfOrderSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		case errors.Is(err, storage.ErrTooOldSample):
+			a.head.metrics.tooOldSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		}
+		return 0, err
+	}
+	st := stSummaries
+	b := a.getCurrentBatch(st, ms.ref)
+
+	b.summaries = append(b.summaries, record.RefSummarySample{
+		Ref: ms.ref,
+		T:   t,
+		S:   s,
+	})
+	b.summariesSeries = append(b.summariesSeries, ms)
+	slog.Debug("TIME", slog.Any("a.mint", a.mint), slog.Any("a.maxT", a.maxt), slog.Any("t", t))
+	if t < a.mint {
+		a.mint = t
+	}
+	if t > a.maxt {
+		a.maxt = t
+	}
+	return storage.SeriesRef(ms.ref), nil
+}
+
+func (s *memSeries) appendableSummary(t int64, sum *summary.Summary, headMaxt, minValidTime, oooTimeWindow int64) (isOOO bool, oooDelta int64, err error) {
+	// Check if we can append in the in-order chunk.
+	if t >= minValidTime {
+		if s.headChunks == nil {
+			// The series has no sample and was freshly created.
+			return false, 0, nil
+		}
+		sMaxt := s.maxTime()
+		if t > sMaxt {
+			return false, 0, nil
+		}
+		slog.Debug("appendable", slog.Any("s.lastSummaryValue", s.lastSummaryValue))
+		if t == sMaxt {
+			// We are allowing exact duplicates as we can encounter them in valid cases
+			// like federation and erroring out at that time would be extremely noisy.
+			// This only checks against the latest in-order sample.
+			// The OOO headchunk has its own method to detect these duplicates.
+			if !sum.Equals(s.lastSummaryValue) {
+				return false, 0, storage.ErrDuplicateSampleForTimestamp
+			}
+			// Sample is identical (ts + value) with most current (highest ts) sample in sampleBuf.
+			return false, 0, nil
+		}
+	}
+
+	// The sample cannot go in the in-order chunk. Check if it can go in the out-of-order chunk.
+	if oooTimeWindow > 0 && t >= headMaxt-oooTimeWindow {
+		return true, headMaxt - t, nil
+	}
+
+	// The sample cannot go in both in-order and out-of-order chunk.
+	if oooTimeWindow > 0 {
+		return true, headMaxt - t, storage.ErrTooOldSample
+	}
+	if t < minValidTime {
+		return false, headMaxt - t, storage.ErrOutOfBounds
+	}
+	return false, headMaxt - t, storage.ErrOutOfOrderSample
+}
+
+func (*headAppender) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	return 0, errors.New("not implemented")
+}
+
 // UpdateMetadata for headAppender assumes the series ref already exists, and so it doesn't
 // use getOrCreate or make any of the lset sanity checks that Append does.
 func (a *headAppender) UpdateMetadata(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata) (storage.SeriesRef, error) {
@@ -1127,6 +1255,20 @@ func (a *headAppenderBase) log() error {
 				rec = enc.CustomBucketsFloatHistogramSamples(customBucketsFloatHistograms, buf)
 				if err := a.head.wal.Log(rec); err != nil {
 					return fmt.Errorf("log custom buckets float histograms: %w", err)
+				}
+			}
+		}
+		slog.Debug("inside log", slog.Any("summary size", b.summaries))
+		if len(b.summariesSeries) > 0 {
+			slog.Debug("b.summariesSeries")
+			rec = enc.SummarySamples(b.summaries, buf)
+			slog.Debug("enc.SummarySamples(b.summaries, buf)", slog.Any("rec", rec), slog.Any("buf", buf))
+			buf = rec[:0]
+			slog.Debug("enc.SummarySamples(b.summaries, buf)", slog.Any("rec", rec), slog.Any("buf", buf))
+			if len(rec) > 0 {
+				slog.Debug("logging")
+				if err := a.head.wal.Log(rec); err != nil {
+					return fmt.Errorf("log summary: %w", err)
 				}
 			}
 		}
@@ -1850,7 +1992,7 @@ func (s *memSeries) append(t int64, v float64, appendID uint64, o chunkOpts) (sa
 	s.lastValue = v
 	s.lastHistogramValue = nil
 	s.lastFloatHistogramValue = nil
-
+	s.lastSummaryValue = nil
 	if appendID > 0 {
 		s.txs.add(appendID)
 	}

@@ -655,6 +655,7 @@ func (w *WL) pagesPerSegment() int {
 // Log writes the records into the log.
 // Multiple records can be passed at once to reduce writes and increase throughput.
 func (w *WL) Log(recs ...[]byte) error {
+	w.logger.Debug("inside log")
 	w.mtx.Lock()
 	defer w.mtx.Unlock()
 	// Callers could just implement their own list record format but adding

@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -68,6 +69,14 @@ func (nopAppender) AppendSTZeroSample(storage.SeriesRef, labels.Labels, int64, i
 	return 5, nil
 }
 
+func (nopAppender) AppendSummary(storage.SeriesRef, labels.Labels, int64, *summary.Summary) (storage.SeriesRef, error) {
+	return 6, nil
+}
+
+func (nopAppender) AppendSummarySTZeroSample(storage.SeriesRef, labels.Labels, int64, int64, *summary.Summary) (storage.SeriesRef, error) {
+	return 7, nil
+}
+
 func (nopAppender) Commit() error   { return nil }
 func (nopAppender) Rollback() error { return nil }
 
@@ -87,6 +96,12 @@ type histogramSample struct {
 	t      int64
 	h      *histogram.Histogram
 	fh     *histogram.FloatHistogram
+}
+
+type summarySample struct {
+	metric labels.Labels
+	t      int64
+	s      *summary.Summary
 }
 
 type metadataEntry struct {
@@ -134,6 +149,9 @@ type collectResultAppender struct {
 	pendingExemplars     []exemplar.Exemplar
 	resultMetadata       []metadataEntry
 	pendingMetadata      []metadataEntry
+	resultSummaries      []summarySample
+	pendingSummaries     []summarySample
+	rolledbackSummaries  []summarySample
 }
 
 func (*collectResultAppender) SetOptions(*storage.AppendOptions) {}
@@ -191,6 +209,21 @@ func (a *collectResultAppender) AppendHistogramSTZeroSample(ref storage.SeriesRe
 	return a.AppendHistogram(ref, l, st, nil, &histogram.FloatHistogram{})
 }
 
+func (a *collectResultAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	a.mtx.Lock()
+	defer a.mtx.Unlock()
+	a.pendingSummaries = append(a.pendingSummaries, summarySample{s: s, t: t, metric: l})
+	if a.next == nil {
+		return 0, nil
+	}
+
+	return a.next.AppendSummary(ref, l, t, s)
+}
+
+func (a *collectResultAppender) AppendSummarySTZeroSample(ref storage.SeriesRef, l labels.Labels, _, st int64, s *summary.Summary) (storage.SeriesRef, error) {
+	return a.AppendSummary(ref, l, st, s)
+}
+
 func (a *collectResultAppender) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (storage.SeriesRef, error) {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
@@ -215,10 +248,12 @@ func (a *collectResultAppender) Commit() error {
 	a.resultFloats = append(a.resultFloats, a.pendingFloats...)
 	a.resultExemplars = append(a.resultExemplars, a.pendingExemplars...)
 	a.resultHistograms = append(a.resultHistograms, a.pendingHistograms...)
+	a.resultSummaries = append(a.resultSummaries, a.pendingSummaries...)
 	a.resultMetadata = append(a.resultMetadata, a.pendingMetadata...)
 	a.pendingFloats = nil
 	a.pendingExemplars = nil
 	a.pendingHistograms = nil
+	a.pendingSummaries = nil
 	a.pendingMetadata = nil
 	if a.next == nil {
 		return nil
@@ -233,6 +268,8 @@ func (a *collectResultAppender) Rollback() error {
 	a.rolledbackHistograms = a.pendingHistograms
 	a.pendingFloats = nil
 	a.pendingHistograms = nil
+	a.rolledbackSummaries = a.pendingSummaries
+	a.pendingSummaries = nil
 	if a.next == nil {
 		return nil
 	}

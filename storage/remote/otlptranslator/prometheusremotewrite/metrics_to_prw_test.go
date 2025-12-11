@@ -35,6 +35,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -1095,6 +1096,7 @@ func BenchmarkPrometheusConverter_FromMetrics(b *testing.B) {
 type noOpAppender struct {
 	samples    int
 	histograms int
+	summaries  int
 	metadata   int
 }
 
@@ -1124,6 +1126,15 @@ func (a *noOpAppender) UpdateMetadata(_ storage.SeriesRef, _ labels.Labels, _ me
 }
 
 func (*noOpAppender) AppendExemplar(_ storage.SeriesRef, _ labels.Labels, _ exemplar.Exemplar) (storage.SeriesRef, error) {
+	return 1, nil
+}
+
+func (a *noOpAppender) AppendSummary(_ storage.SeriesRef, _ labels.Labels, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	a.summaries++
+	return 1, nil
+}
+
+func (*noOpAppender) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
 	return 1, nil
 }
 
