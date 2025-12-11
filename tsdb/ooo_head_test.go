@@ -85,7 +85,7 @@ func testOOOInsert(t *testing.T,
 			chunk.samples = make([]sample, numPreExisting)
 			chunk.samples = makeEvenSampleSlice(numPreExisting, sampleFunc)
 			newSample := sampleFunc(valOdd(insertPos))
-			chunk.Insert(newSample.t, newSample.f, newSample.h, newSample.fh)
+			chunk.Insert(newSample.t, newSample.f, newSample.h, newSample.fh, newSample.s)
 
 			var expSamples []sample
 			// Our expected new samples slice, will be first the original samples.
@@ -145,7 +145,7 @@ func testOOOInsertDuplicate(t *testing.T,
 			dupSample := chunk.samples[dupPos]
 			dupSample.f = 0.123
 
-			ok := chunk.Insert(dupSample.t, dupSample.f, dupSample.h, dupSample.fh)
+			ok := chunk.Insert(dupSample.t, dupSample.f, dupSample.h, dupSample.fh, dupSample.s)
 
 			expSamples := makeEvenSampleSlice(num, sampleFunc) // We expect no change.
 			require.False(t, ok)

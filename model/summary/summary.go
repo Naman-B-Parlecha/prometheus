@@ -59,3 +59,19 @@ func (s *Summary) Equals(s2 *Summary) bool {
 	}
 	return true
 }
+
+func (s *Summary) Copy() *Summary {
+	c := Summary{
+		Sum:   s.Sum,
+		Count: s.Count,
+	}
+	if len(s.QuantileTargets) != 0 {
+		c.QuantileTargets = make([]float64, len(s.QuantileTargets))
+		copy(c.QuantileTargets, s.QuantileTargets)
+	}
+	if len(s.QuantileValues) != 0 {
+		c.QuantileValues = make([]float64, len(s.QuantileValues))
+		copy(c.QuantileValues, s.QuantileValues)
+	}
+	return &c
+}

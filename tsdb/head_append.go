@@ -291,6 +291,18 @@ func (h *Head) putFloatHistogramBuffer(b []record.RefFloatHistogramSample) {
 	h.floatHistogramsPool.Put(b[:0])
 }
 
+func (h *Head) getSummaryBuffer() []record.RefSummarySample {
+	b := h.summariesPool.Get()
+	if b == nil {
+		return make([]record.RefSummarySample, 0, 512)
+	}
+	return b
+}
+
+func (h *Head) putSummaryBuffer(b []record.RefSummarySample) {
+	h.summariesPool.Put(b[:0])
+}
+
 func (h *Head) getMetadataBuffer() []record.RefMetadata {
 	b := h.metadataPool.Get()
 	if b == nil {
@@ -396,6 +408,8 @@ func (b *appendBatch) close(h *Head) {
 	b.histogramSeries = nil
 	h.putFloatHistogramBuffer(b.floatHistograms)
 	b.floatHistograms = nil
+	h.putSummaryBuffer(b.summaries)
+	b.summaries = nil
 	h.putSeriesBuffer(b.floatHistogramSeries)
 	b.floatHistogramSeries = nil
 	h.putMetadataBuffer(b.metadata)
@@ -1037,7 +1051,7 @@ func (a *headAppender) AppendSummary(ref storage.SeriesRef, lset labels.Labels, 
 	// Fail fast if OOO is disabled and the sample is out of bounds.
 	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.
 	if a.oooTimeWindow == 0 && t < a.minValidTime {
-		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeHistogram).Inc()
+		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
 		return 0, storage.ErrOutOfBounds
 	}
 
@@ -1299,18 +1313,23 @@ func exemplarsForEncoding(es []exemplarWithSeriesRef) []record.RefExemplar {
 type appenderCommitContext struct {
 	floatsAppended     int
 	histogramsAppended int
+	summariesAppended  int
 	// Number of samples out of order but accepted: with ooo enabled and within time window.
 	oooFloatsAccepted    int
 	oooHistogramAccepted int
+	oooSummaryAccepted   int
 	// Number of samples rejected due to: out of order but OOO support disabled.
-	floatOOORejected int
-	histoOOORejected int
+	floatOOORejected   int
+	histoOOORejected   int
+	summaryOOORejected int
 	// Number of samples rejected due to: out of order but too old (OOO support enabled, but outside time window).
-	floatTooOldRejected int
-	histoTooOldRejected int
+	floatTooOldRejected   int
+	histoTooOldRejected   int
+	summaryTooOldRejected int
 	// Number of samples rejected due to: out of bounds: with t < minValidTime (OOO support disabled).
 	floatOOBRejected    int
 	histoOOBRejected    int
+	summaryOOBRejected  int
 	inOrderMint         int64
 	inOrderMaxt         int64
 	oooMinT             int64
@@ -1318,6 +1337,7 @@ type appenderCommitContext struct {
 	wblSamples          []record.RefSample
 	wblHistograms       []record.RefHistogramSample
 	wblFloatHistograms  []record.RefFloatHistogramSample
+	wblSummaries        []record.RefSummarySample
 	oooMmapMarkers      map[chunks.HeadSeriesRef][]chunks.ChunkDiskMapperRef
 	oooMmapMarkersCount int
 	oooRecords          [][]byte
@@ -1353,6 +1373,7 @@ func (acc *appenderCommitContext) collectOOORecords(a *headAppender) {
 		acc.wblSamples = nil
 		acc.wblHistograms = nil
 		acc.wblFloatHistograms = nil
+		acc.wblSummaries = nil
 		acc.oooMmapMarkers = nil
 		acc.oooMmapMarkersCount = 0
 		return
@@ -1401,10 +1422,15 @@ func (acc *appenderCommitContext) collectOOORecords(a *headAppender) {
 			acc.oooRecords = append(acc.oooRecords, r)
 		}
 	}
+	if len(acc.wblSummaries) > 0 {
+		r := acc.enc.SummarySamples(acc.wblSummaries, a.head.getBytesBuffer())
+		acc.oooRecords = append(acc.oooRecords, r)
+	}
 
 	acc.wblSamples = nil
 	acc.wblHistograms = nil
 	acc.wblFloatHistograms = nil
+	acc.wblSummaries = nil
 	acc.oooMmapMarkers = nil
 }
 
@@ -1518,6 +1544,18 @@ func (a *headAppender) commitFloats(b *appendBatch, acc *appenderCommitContext) 
 				acc.histogramsAppended++
 				series.Unlock()
 				continue
+			case series.lastSummaryValue != nil:
+				b.summaries = append(b.summaries, record.RefSummarySample{
+					Ref: series.ref,
+					T:   s.T,
+					S:   &summary.Summary{Sum: s.V},
+				})
+				b.summariesSeries = append(b.summariesSeries, series)
+				// This sample was counted as a float but is now a float histogram.
+				acc.floatsAppended--
+				acc.summariesAppended++
+				series.Unlock()
+				continue
 			}
 		}
 		oooSample, _, err := series.appendable(s.T, s.V, a.headMaxt, a.minValidTime, a.oooTimeWindow)
@@ -1532,7 +1570,7 @@ func (a *headAppender) commitFloats(b *appendBatch, acc *appenderCommitContext) 
 			// Sample is OOO and OOO handling is enabled
 			// and the delta is within the OOO tolerance.
 			var mmapRefs []chunks.ChunkDiskMapperRef
-			ok, chunkCreated, mmapRefs = series.insert(s.T, s.V, nil, nil, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
+			ok, chunkCreated, mmapRefs = series.insert(s.T, s.V, nil, nil, nil, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
 			if chunkCreated {
 				r, ok := acc.oooMmapMarkers[series.ref]
 				if !ok || r != nil {
@@ -1637,7 +1675,7 @@ func (a *headAppender) commitHistograms(b *appendBatch, acc *appenderCommitConte
 			// Sample is OOO and OOO handling is enabled
 			// and the delta is within the OOO tolerance.
 			var mmapRefs []chunks.ChunkDiskMapperRef
-			ok, chunkCreated, mmapRefs = series.insert(s.T, 0, s.H, nil, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
+			ok, chunkCreated, mmapRefs = series.insert(s.T, 0, s.H, nil, nil, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
 			if chunkCreated {
 				r, ok := acc.oooMmapMarkers[series.ref]
 				if !ok || r != nil {
@@ -1746,7 +1784,7 @@ func (a *headAppender) commitFloatHistograms(b *appendBatch, acc *appenderCommit
 			// Sample is OOO and OOO handling is enabled
 			// and the delta is within the OOO tolerance.
 			var mmapRefs []chunks.ChunkDiskMapperRef
-			ok, chunkCreated, mmapRefs = series.insert(s.T, 0, nil, s.FH, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
+			ok, chunkCreated, mmapRefs = series.insert(s.T, 0, nil, s.FH, nil, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
 			if chunkCreated {
 				r, ok := acc.oooMmapMarkers[series.ref]
 				if !ok || r != nil {
@@ -1795,6 +1833,103 @@ func (a *headAppender) commitFloatHistograms(b *appendBatch, acc *appenderCommit
 				staleToNonStale = value.IsStaleNaN(series.lastFloatHistogramValue.Sum) && !value.IsStaleNaN(s.FH.Sum)
 			}
 			ok, chunkCreated = series.appendFloatHistogram(s.T, s.FH, a.appendID, acc.appendChunkOpts)
+			if ok {
+				if s.T < acc.inOrderMint {
+					acc.inOrderMint = s.T
+				}
+				if s.T > acc.inOrderMaxt {
+					acc.inOrderMaxt = s.T
+				}
+				if newlyStale {
+					a.head.numStaleSeries.Inc()
+				}
+				if staleToNonStale {
+					a.head.numStaleSeries.Dec()
+				}
+			} else {
+				acc.histogramsAppended--
+				acc.histoOOORejected++
+			}
+		}
+
+		if chunkCreated {
+			a.head.metrics.chunks.Inc()
+			a.head.metrics.chunksCreated.Inc()
+		}
+
+		series.cleanupAppendIDsBelow(a.cleanupAppendIDsBelow)
+		series.pendingCommit = false
+		series.Unlock()
+	}
+}
+
+func (a *headAppender) commitSummaries(b *appendBatch, acc *appenderCommitContext) {
+	var ok, chunkCreated bool
+	var series *memSeries
+
+	for i, s := range b.summaries {
+		series = b.summariesSeries[i]
+		series.Lock()
+		oooSample, _, err := series.appendableSummary(s.T, s.S, a.headMaxt, a.minValidTime, a.oooTimeWindow)
+		if err != nil {
+			handleAppendableError(err, &acc.summariesAppended, &acc.summaryOOORejected, &acc.summaryOOBRejected, &acc.summaryTooOldRejected)
+		}
+		switch {
+		case err != nil:
+			// Do nothing here.
+		case oooSample:
+			// Sample is OOO and OOO handling is enabled
+			// and the delta is within the OOO tolerance.
+			var mmapRefs []chunks.ChunkDiskMapperRef
+			ok, chunkCreated, mmapRefs = series.insert(s.T, 0, nil, nil, s.S, a.head.chunkDiskMapper, acc.oooCapMax, a.head.logger)
+			if chunkCreated {
+				r, ok := acc.oooMmapMarkers[series.ref]
+				if !ok || r != nil {
+					// !ok means there are no markers collected for these samples yet. So we first flush the samples
+					// before setting this m-map marker.
+
+					// r != 0 means we have already m-mapped a chunk for this series in the same Commit().
+					// Hence, before we m-map again, we should add the samples and m-map markers
+					// seen till now to the WBL records.
+					acc.collectOOORecords(a)
+				}
+
+				if acc.oooMmapMarkers == nil {
+					acc.oooMmapMarkers = make(map[chunks.HeadSeriesRef][]chunks.ChunkDiskMapperRef)
+				}
+				if len(mmapRefs) > 0 {
+					acc.oooMmapMarkers[series.ref] = mmapRefs
+					acc.oooMmapMarkersCount += len(mmapRefs)
+				} else {
+					// No chunk was written to disk, so we need to set an initial marker for this series.
+					acc.oooMmapMarkers[series.ref] = []chunks.ChunkDiskMapperRef{0}
+					acc.oooMmapMarkersCount++
+				}
+			}
+			if ok {
+				acc.wblSummaries = append(acc.wblSummaries, s)
+				if s.T < acc.oooMinT {
+					acc.oooMinT = s.T
+				}
+				if s.T > acc.oooMaxT {
+					acc.oooMaxT = s.T
+				}
+				acc.oooSummaryAccepted++
+			} else {
+				// Sample is an exact duplicate of the last sample.
+				// NOTE: We can only detect updates if they clash with a sample in the OOOHeadChunk,
+				// not with samples in already flushed OOO chunks.
+				// TODO(codesome): Add error reporting? It depends on addressing https://github.com/prometheus/prometheus/discussions/10305.
+				acc.summariesAppended--
+			}
+		default:
+			newlyStale := value.IsStaleNaN(s.S.Sum)
+			staleToNonStale := false
+			if series.lastSummaryValue != nil {
+				newlyStale = newlyStale && !value.IsStaleNaN(series.lastSummaryValue.Sum)
+				staleToNonStale = value.IsStaleNaN(series.lastSummaryValue.Sum) && !value.IsStaleNaN(s.S.Sum)
+			}
+			ok, chunkCreated = series.appendSummary(s.T, s.S, a.appendID, acc.appendChunkOpts)
 			if ok {
 				if s.T < acc.inOrderMint {
 					acc.inOrderMint = s.T
@@ -1892,6 +2027,7 @@ func (a *headAppender) Commit() (err error) {
 	for _, b := range a.batches {
 		acc.floatsAppended += len(b.floats)
 		acc.histogramsAppended += len(b.histograms) + len(b.floatHistograms)
+		acc.summariesAppended += len(b.summaries)
 		a.commitExemplars(b)
 		defer b.close(h)
 	}
@@ -1911,6 +2047,7 @@ func (a *headAppender) Commit() (err error) {
 		a.commitFloats(b, acc)
 		a.commitHistograms(b, acc)
 		a.commitFloatHistograms(b, acc)
+		a.commitSummaries(b, acc)
 		commitMetadata(b)
 	}
 	// Unmark all series as pending commit after all samples have been committed.
@@ -1941,7 +2078,7 @@ func (a *headAppender) Commit() (err error) {
 }
 
 // insert is like append, except it inserts. Used for OOO samples.
-func (s *memSeries) insert(t int64, v float64, h *histogram.Histogram, fh *histogram.FloatHistogram, chunkDiskMapper *chunks.ChunkDiskMapper, oooCapMax int64, logger *slog.Logger) (inserted, chunkCreated bool, mmapRefs []chunks.ChunkDiskMapperRef) {
+func (s *memSeries) insert(t int64, v float64, h *histogram.Histogram, fh *histogram.FloatHistogram, sm *summary.Summary, chunkDiskMapper *chunks.ChunkDiskMapper, oooCapMax int64, logger *slog.Logger) (inserted, chunkCreated bool, mmapRefs []chunks.ChunkDiskMapperRef) {
 	if s.ooo == nil {
 		s.ooo = &memSeriesOOOFields{}
 	}
@@ -1952,7 +2089,7 @@ func (s *memSeries) insert(t int64, v float64, h *histogram.Histogram, fh *histo
 		chunkCreated = true
 	}
 
-	ok := c.chunk.Insert(t, v, h, fh)
+	ok := c.chunk.Insert(t, v, h, fh, sm)
 	if ok {
 		if chunkCreated || t < c.minTime {
 			c.minTime = t
@@ -2109,6 +2246,10 @@ func (s *memSeries) appendFloatHistogram(t int64, fh *histogram.FloatHistogram, 
 	return true, true
 }
 
+func (s *memSeries) appendSummary(t int64, sm *summary.Summary, appendID uint64, o chunkOpts) (sampleInOrder, chunkCreated bool) {
+prevApp, _ := s.app.(*chunkenc.FloatHistogramAppender)
+}
+
 // appendPreprocessor takes care of cutting new XOR chunks and m-mapping old ones. XOR chunks are cut based on the
 // number of samples they contain with a soft cap in bytes.
 // It is unsafe to call this concurrently with s.iterator(...) without holding the series lock.
@@ -2253,6 +2394,9 @@ func (s *memSeries) histogramsAppendPreprocessor(t int64, e chunkenc.Encoding, o
 	}
 
 	return c, true, chunkCreated
+}
+
+func (s *memSeries) summaryAppendPreprocessor(t int64, e chunkenc.Encoding, o chunkOpts) (c *memChunk, sampleInOrder, chunkCreated bool) {
 }
 
 // computeChunkEndTime estimates the end timestamp based the beginning of a

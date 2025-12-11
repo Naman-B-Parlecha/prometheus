@@ -92,6 +92,7 @@ type Head struct {
 	exemplarsPool       zeropool.Pool[[]exemplarWithSeriesRef]
 	histogramsPool      zeropool.Pool[[]record.RefHistogramSample]
 	floatHistogramsPool zeropool.Pool[[]record.RefFloatHistogramSample]
+	summariesPool       zeropool.Pool[[]record.RefSummarySample]
 	metadataPool        zeropool.Pool[[]record.RefMetadata]
 	seriesPool          zeropool.Pool[[]*memSeries]
 	typeMapPool         zeropool.Pool[map[chunks.HeadSeriesRef]sampleType]
@@ -2091,16 +2092,18 @@ type sample struct {
 	f  float64
 	h  *histogram.Histogram
 	fh *histogram.FloatHistogram
+	s  *summary.Summary
 }
 
-func newSample(t int64, v float64, h *histogram.Histogram, fh *histogram.FloatHistogram) chunks.Sample {
-	return sample{t, v, h, fh}
+func newSample(t int64, v float64, h *histogram.Histogram, fh *histogram.FloatHistogram, s *summary.Summary) chunks.Sample {
+	return sample{t, v, h, fh, s}
 }
 
 func (s sample) T() int64                      { return s.t }
 func (s sample) F() float64                    { return s.f }
 func (s sample) H() *histogram.Histogram       { return s.h }
 func (s sample) FH() *histogram.FloatHistogram { return s.fh }
+func (s sample) S() *summary.Summary           { return s.s }
 
 func (s sample) Type() chunkenc.ValueType {
 	switch {
@@ -2108,6 +2111,8 @@ func (s sample) Type() chunkenc.ValueType {
 		return chunkenc.ValHistogram
 	case s.fh != nil:
 		return chunkenc.ValFloatHistogram
+	case s.s != nil:
+		return chunkenc.ValSummary
 	default:
 		return chunkenc.ValFloat
 	}
@@ -2120,6 +2125,9 @@ func (s sample) Copy() chunks.Sample {
 	}
 	if s.fh != nil {
 		c.fh = s.fh.Copy()
+	}
+	if s.s != nil {
+		c.s = s.s.Copy()
 	}
 	return c
 }

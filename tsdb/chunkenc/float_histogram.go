@@ -20,6 +20,7 @@ import (
 	"math"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 )
 
@@ -685,7 +686,9 @@ func (*FloatHistogramAppender) recodeHistogram(
 func (*FloatHistogramAppender) AppendHistogram(*HistogramAppender, int64, *histogram.Histogram, bool) (Chunk, bool, Appender, error) {
 	panic("appended a histogram sample to a float histogram chunk")
 }
-
+func (*FloatHistogramAppender) AppendSummary(*SummaryAppender, int64, *summary.Summary, bool) (Chunk, Appender, error) {
+	panic("appended a summary sample to a float histogram chunk")
+}
 func (a *FloatHistogramAppender) AppendFloatHistogram(prev *FloatHistogramAppender, t int64, h *histogram.FloatHistogram, appendOnly bool) (Chunk, bool, Appender, error) {
 	if a.NumSamples() == 0 {
 		a.appendFloatHistogram(t, h)

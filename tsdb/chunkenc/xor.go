@@ -49,6 +49,7 @@ import (
 	"math/bits"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 const (
@@ -231,6 +232,10 @@ func (*xorAppender) AppendHistogram(*HistogramAppender, int64, *histogram.Histog
 
 func (*xorAppender) AppendFloatHistogram(*FloatHistogramAppender, int64, *histogram.FloatHistogram, bool) (Chunk, bool, Appender, error) {
 	panic("appended a float histogram sample to a float chunk")
+}
+
+func (*xorAppender) AppendSummary(*SummaryAppender, int64, *summary.Summary, bool) (Chunk, Appender, error) {
+	panic("appended a summary sample to a float chunk")
 }
 
 type xorIterator struct {
