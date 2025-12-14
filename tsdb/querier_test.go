@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2293,10 +2294,6 @@ func (m mockIndex) LabelValues(_ context.Context, name string, hints *storage.La
 	return values, nil
 }
 
-func (m mockIndex) LabelValueFor(_ context.Context, id storage.SeriesRef, label string) (string, error) {
-	return m.series[id].l.Get(label), nil
-}
-
 func (m mockIndex) LabelNamesFor(_ context.Context, postings index.Postings) ([]string, error) {
 	namesMap := make(map[string]bool)
 	for postings.Next() {
@@ -3037,14 +3034,14 @@ func TestPostingsForMatchers(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, c := range cases {
-		name := ""
+		var name strings.Builder
 		for i, matcher := range c.matchers {
 			if i > 0 {
-				name += ","
+				name.WriteString(",")
 			}
-			name += matcher.String()
+			name.WriteString(matcher.String())
 		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(name.String(), func(t *testing.T) {
 			exp := map[string]struct{}{}
 			for _, l := range c.exp {
 				exp[l.String()] = struct{}{}
@@ -3312,10 +3309,6 @@ func (mockMatcherIndex) SortedLabelValues(context.Context, string, *storage.Labe
 // LabelValues will return error if it is called.
 func (mockMatcherIndex) LabelValues(context.Context, string, *storage.LabelHints, ...*labels.Matcher) ([]string, error) {
 	return []string{}, errors.New("label values called")
-}
-
-func (mockMatcherIndex) LabelValueFor(context.Context, storage.SeriesRef, string) (string, error) {
-	return "", errors.New("label value for called")
 }
 
 func (mockMatcherIndex) LabelNamesFor(context.Context, index.Postings) ([]string, error) {
@@ -3736,10 +3729,6 @@ const mockReaderOfLabelsSeriesCount = checkContextEveryNIterations * 10
 
 func (mockReaderOfLabels) LabelValues(context.Context, string, *storage.LabelHints, ...*labels.Matcher) ([]string, error) {
 	return make([]string, mockReaderOfLabelsSeriesCount), nil
-}
-
-func (mockReaderOfLabels) LabelValueFor(context.Context, storage.SeriesRef, string) (string, error) {
-	panic("LabelValueFor called")
 }
 
 func (mockReaderOfLabels) SortedLabelValues(context.Context, string, *storage.LabelHints, ...*labels.Matcher) ([]string, error) {
