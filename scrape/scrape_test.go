@@ -1000,6 +1000,7 @@ func newBasicScrapeLoopWithFallback(t testing.TB, ctx context.Context, scraper s
 		model.UTF8Validation,
 		model.NoEscaping,
 		fallback,
+		false,
 	)
 }
 
@@ -1150,6 +1151,7 @@ func TestScrapeLoopRun(t *testing.T) {
 		model.UTF8Validation,
 		model.NoEscaping,
 		"",
+		false,
 	)
 
 	// The loop must terminate during the initial offset if the context
@@ -1338,6 +1340,7 @@ func TestScrapeLoopMetadata(t *testing.T) {
 		model.UTF8Validation,
 		model.NoEscaping,
 		"",
+		false,
 	)
 	defer cancel()
 

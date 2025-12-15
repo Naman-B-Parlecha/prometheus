@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/schema"
 )
@@ -174,6 +175,11 @@ func (p *OpenMetricsParser) Series() ([]byte, *int64, float64) {
 // support sparse histograms yet.
 func (*OpenMetricsParser) Histogram() ([]byte, *int64, *histogram.Histogram, *histogram.FloatHistogram) {
 	return nil, nil, nil, nil
+}
+
+// Summary does not support native summary.
+func (*OpenMetricsParser) Summary() ([]byte, *int64, *summary.Summary) {
+	return nil, nil, nil
 }
 
 // Help returns the metric name and help text in the current entry.

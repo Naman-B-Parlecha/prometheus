@@ -116,6 +116,8 @@ func Load(s string, logger *slog.Logger) (*Config, error) {
 		return nil, fmt.Errorf("unsupported OTLP translation strategy %q", cfg.OTLPConfig.TranslationStrategy)
 	}
 	cfg.loaded = true
+	logger.Debug("global convert to ns value", "convert_classic_summaries_to_ns", cfg.GlobalConfig.ConvertClassicSummariesToNS)
+	logger.Debug("job level convert to ns value", "convert_classic_summaries_to_ns", *cfg.ScrapeConfigs[0].ConvertClassicSummariesToNS)
 	return cfg, nil
 }
 
@@ -175,6 +177,7 @@ var (
 		// ScrapeNativeHistograms default changes to true.
 		ScrapeNativeHistograms:         &f,
 		ConvertClassicHistogramsToNHCB: false,
+		ConvertClassicSummariesToNS:    false,
 		AlwaysScrapeClassicHistograms:  false,
 		MetricNameValidationScheme:     model.UTF8Validation,
 		MetricNameEscapingScheme:       model.AllowUTF8,
@@ -190,7 +193,7 @@ var (
 	// used unaltered, to check for parameter correctness and fill out default
 	// values that can't be set inline in this declaration.
 	DefaultScrapeConfig = ScrapeConfig{
-		// ScrapeTimeout, ScrapeInterval, ScrapeProtocols, AlwaysScrapeClassicHistograms, and ConvertClassicHistogramsToNHCB default to the configured globals.
+		// ScrapeTimeout, ScrapeInterval, ScrapeProtocols, AlwaysScrapeClassicHistograms, and ConvertClassicSummariesToNS default to the configured globals.
 		MetricsPath:       "/metrics",
 		Scheme:            "http",
 		HonorLabels:       false,
@@ -511,6 +514,8 @@ type GlobalConfig struct {
 	ScrapeNativeHistograms *bool `yaml:"scrape_native_histograms,omitempty"`
 	// Whether to convert all scraped classic histograms into native histograms with custom buckets.
 	ConvertClassicHistogramsToNHCB bool `yaml:"convert_classic_histograms_to_nhcb,omitempty"`
+	// Whether to convert all scraped classic summaries into a native summary.
+	ConvertClassicSummariesToNS bool `yaml:"convert_classic_summaries_to_ns,omitempty"`
 	// Whether to scrape a classic histogram, even if it is also exposed as a native histogram.
 	AlwaysScrapeClassicHistograms bool `yaml:"always_scrape_classic_histograms,omitempty"`
 }
@@ -687,6 +692,7 @@ func (c *GlobalConfig) isZero() bool {
 		c.ScrapeProtocols == nil &&
 		c.ScrapeNativeHistograms == nil &&
 		!c.ConvertClassicHistogramsToNHCB &&
+		!c.ConvertClassicSummariesToNS &&
 		!c.AlwaysScrapeClassicHistograms
 }
 
@@ -754,6 +760,8 @@ type ScrapeConfig struct {
 	AlwaysScrapeClassicHistograms *bool `yaml:"always_scrape_classic_histograms,omitempty"`
 	// Whether to convert all scraped classic histograms into a native histogram with custom buckets.
 	ConvertClassicHistogramsToNHCB *bool `yaml:"convert_classic_histograms_to_nhcb,omitempty"`
+	// Whether to convert all scraped classic summaries into a native summary.
+	ConvertClassicSummariesToNS *bool `yaml:"convert_classic_summaries_to_ns,omitempty"`
 	// File to which scrape failures are logged.
 	ScrapeFailureLogFile string `yaml:"scrape_failure_log_file,omitempty"`
 	// The HTTP resource path on which to fetch metrics from targets.
@@ -987,6 +995,11 @@ func (c *ScrapeConfig) Validate(globalConfig GlobalConfig) error {
 		c.ConvertClassicHistogramsToNHCB = &global
 	}
 
+	if c.ConvertClassicSummariesToNS == nil {
+		global := globalConfig.ConvertClassicSummariesToNS
+		c.ConvertClassicSummariesToNS = &global
+	}
+
 	if c.AlwaysScrapeClassicHistograms == nil {
 		global := globalConfig.AlwaysScrapeClassicHistograms
 		c.AlwaysScrapeClassicHistograms = &global
@@ -1038,6 +1051,11 @@ func (c *ScrapeConfig) ScrapeNativeHistogramsEnabled() bool {
 // ConvertClassicHistogramsToNHCBEnabled returns whether to convert classic histograms to NHCB.
 func (c *ScrapeConfig) ConvertClassicHistogramsToNHCBEnabled() bool {
 	return c.ConvertClassicHistogramsToNHCB != nil && *c.ConvertClassicHistogramsToNHCB
+}
+
+// ConvertClassicSummariesToNSEnabled returns whether to convert classic summaries to NS.
+func (c *ScrapeConfig) ConvertClassicSummariesToNSEnabled() bool {
+	return c.ConvertClassicSummariesToNS != nil && *c.ConvertClassicSummariesToNS
 }
 
 // AlwaysScrapeClassicHistogramsEnabled returns whether to always scrape classic histograms.

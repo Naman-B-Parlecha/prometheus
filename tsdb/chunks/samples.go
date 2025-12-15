@@ -15,6 +15,7 @@ package chunks
 
 import (
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
 
@@ -28,6 +29,7 @@ type Sample interface {
 	F() float64
 	H() *histogram.Histogram
 	FH() *histogram.FloatHistogram
+	S() *summary.Summary
 	Type() chunkenc.ValueType
 	Copy() Sample // Returns a deep copy.
 }
@@ -42,6 +44,7 @@ type sample struct {
 	f  float64
 	h  *histogram.Histogram
 	fh *histogram.FloatHistogram
+	s  *summary.Summary
 }
 
 func (s sample) T() int64 {
@@ -60,12 +63,18 @@ func (s sample) FH() *histogram.FloatHistogram {
 	return s.fh
 }
 
+func (s sample) S() *summary.Summary {
+	return s.s
+}
+
 func (s sample) Type() chunkenc.ValueType {
 	switch {
 	case s.h != nil:
 		return chunkenc.ValHistogram
 	case s.fh != nil:
 		return chunkenc.ValFloatHistogram
+	case s.s != nil:
+		return chunkenc.ValSummary
 	default:
 		return chunkenc.ValFloat
 	}
@@ -78,6 +87,9 @@ func (s sample) Copy() Sample {
 	}
 	if s.fh != nil {
 		c.fh = s.fh.Copy()
+	}
+	if s.s != nil {
+		c.s = s.s.Copy()
 	}
 	return c
 }

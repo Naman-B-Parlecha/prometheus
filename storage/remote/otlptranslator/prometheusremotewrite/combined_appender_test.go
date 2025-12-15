@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -817,6 +818,30 @@ func (a *appenderRecorder) AppendHistogramSTZeroSample(ref storage.SeriesRef, ls
 	a.records = append(a.records, appenderRecord{op: "AppendHistogramSTZeroSample", ref: ref, ls: ls})
 	if a.appendHistogramSTZeroSampleError != nil {
 		return 0, a.appendHistogramSTZeroSampleError
+	}
+	if ref == 0 {
+		ref = a.newRef()
+	}
+	a.setOutRef(ref)
+	return ref, nil
+}
+
+func (a *appenderRecorder) AppendSummary(ref storage.SeriesRef, ls labels.Labels, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	a.records = append(a.records, appenderRecord{op: "AppendSummary", ref: ref, ls: ls})
+	if a.appendError != nil {
+		return 0, a.appendError // just adding it for now since test file
+	}
+	if ref == 0 {
+		ref = a.newRef()
+	}
+	a.setOutRef(ref)
+	return ref, nil
+}
+
+func (a *appenderRecorder) AppendSummarySTZeroSample(ref storage.SeriesRef, ls labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	a.records = append(a.records, appenderRecord{op: "AppendSummarySTZeroSample", ref: ref, ls: ls})
+	if a.appendSTZeroSampleError != nil {
+		return 0, a.appendSTZeroSampleError // just adding it for now since test file
 	}
 	if ref == 0 {
 		ref = a.newRef()

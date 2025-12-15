@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
@@ -783,7 +784,9 @@ func (p *populateWithDelSeriesIterator) AtHistogram(h *histogram.Histogram) (int
 func (p *populateWithDelSeriesIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return p.curr.AtFloatHistogram(fh)
 }
-
+func (p *populateWithDelSeriesIterator) AtSummary(s *summary.Summary) (int64, *summary.Summary) {
+	return p.curr.AtSummary(s)
+}
 func (p *populateWithDelSeriesIterator) AtT() int64 {
 	return p.curr.AtT()
 }
@@ -1196,6 +1199,11 @@ func (it *DeletedIterator) AtHistogram(h *histogram.Histogram) (int64, *histogra
 func (it *DeletedIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	t, h := it.Iter.AtFloatHistogram(fh)
 	return t, h
+}
+
+func (it *DeletedIterator) AtSummary(s *summary.Summary) (int64, *summary.Summary) {
+	t, s := it.Iter.AtSummary(s)
+	return t, s
 }
 
 func (it *DeletedIterator) AtT() int64 {

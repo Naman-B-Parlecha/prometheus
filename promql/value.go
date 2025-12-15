@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -473,6 +474,10 @@ func (ssi *storageSeriesIterator) At() (t int64, v float64) {
 
 func (*storageSeriesIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
 	panic(errors.New("storageSeriesIterator: AtHistogram not supported"))
+}
+
+func (*storageSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic(errors.New("storageSeriesIterator: AtSummary not supported"))
 }
 
 func (ssi *storageSeriesIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {

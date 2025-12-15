@@ -20,6 +20,7 @@ import (
 	"math"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 )
 
@@ -221,6 +222,10 @@ func (a *HistogramAppender) NumSamples() int {
 // samples must never be appended to a histogram chunk.
 func (*HistogramAppender) Append(int64, float64) {
 	panic("appended a float sample to a histogram chunk")
+}
+
+func (*HistogramAppender) AppendSummary(*SummaryAppender, int64, *summary.Summary, bool) (Chunk, Appender, error) {
+	panic("appended a summary sample to a float histogram chunk")
 }
 
 // appendable returns whether the chunk can be appended to, and if so whether
@@ -1346,4 +1351,8 @@ func resize[T any](items []T, n int) []T {
 		return make([]T, n)
 	}
 	return items[:n]
+}
+
+func (it *histogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("cannot call histogramIterator.AtSummary")
 }

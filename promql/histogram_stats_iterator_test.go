@@ -21,6 +21,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
@@ -231,6 +232,10 @@ func (h *histogramIterator) AtHistogram(*histogram.Histogram) (int64, *histogram
 
 func (h *histogramIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return 0, h.histograms[h.i].ToFloat(nil)
+}
+
+func (*histogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("not implemented")
 }
 
 func (*histogramIterator) AtT() int64 { return 0 }

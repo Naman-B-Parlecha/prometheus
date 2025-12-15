@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"unicode/utf8"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	dto "github.com/prometheus/prometheus/prompb/io/prometheus/client"
 	"github.com/prometheus/prometheus/schema"
 	"github.com/prometheus/prometheus/util/convertnhcb"
@@ -80,16 +82,20 @@ type ProtobufParser struct {
 	// We need to preload NHCB since we cannot do error handling in Histogram().
 	nhcbH  *histogram.Histogram
 	nhcbFH *histogram.FloatHistogram
+
+	// Whether to convert classic summaries to native summaries.
+	convertClassicSummariesToNS bool
 }
 
 // NewProtobufParser returns a parser for the payload in the byte slice.
 func NewProtobufParser(
 	b []byte,
-	ignoreNativeHistograms, parseClassicHistograms, convertClassicHistogramsToNHCB, enableTypeAndUnitLabels bool,
+	ignoreNativeHistograms, parseClassicHistograms, convertClassicHistogramsToNHCB, enableTypeAndUnitLabels, convertClassicSummariesToNS bool,
 	st *labels.SymbolTable,
 ) Parser {
 	builder := labels.NewScratchBuilderWithSymbolTable(st, 16)
 	builder.SetUnsafeAdd(true)
+	slog.Debug("convertClassicSummariesToNS in ProtobufParser", slog.Any("convertClassicSummariesToNS", convertClassicSummariesToNS))
 	return &ProtobufParser{
 		dec:        dto.NewMetricStreamingDecoder(b),
 		entryBytes: &bytes.Buffer{},
@@ -100,6 +106,7 @@ func NewProtobufParser(
 		parseClassicHistograms:         parseClassicHistograms,
 		enableTypeAndUnitLabels:        enableTypeAndUnitLabels,
 		convertClassicHistogramsToNHCB: convertClassicHistogramsToNHCB,
+		convertClassicSummariesToNS:    convertClassicSummariesToNS,
 		tmpNHCB:                        convertnhcb.NewTempHistogram(),
 	}
 }
@@ -279,6 +286,35 @@ func (p *ProtobufParser) Histogram() ([]byte, *int64, *histogram.Histogram, *his
 		return p.entryBytes.Bytes(), ts, &sh, nil
 	}
 	return p.entryBytes.Bytes(), nil, &sh, nil
+}
+
+func (p *ProtobufParser) Summary() ([]byte, *int64, *summary.Summary) {
+	slog.Debug("Inside Summary Interface of parser")
+	var (
+		ts = &p.dec.TimestampMs // To save memory allocations, never nil.
+		s  = p.dec.GetSummary()
+	)
+	ns := summary.Summary{
+		Count:           s.GetSampleCount(),
+		Sum:             s.GetSampleSum(),
+		QuantileValues:  make([]float64, len(s.GetQuantile())),
+		QuantileTargets: make([]float64, len(s.GetQuantile())),
+	}
+	for i, q := range s.GetQuantile() {
+		ns.QuantileTargets[i] = q.GetQuantile()
+		ns.QuantileValues[i] = q.GetValue()
+	}
+	err := ns.Validate()
+	if err != nil {
+		slog.Warn("invalid summary encountered in protobuf parser", slog.String("metric", p.dec.GetName()), slog.Any("err", err))
+	}
+	if *ts != 0 {
+		slog.Debug("Inside Summary Interface of parser with ts returning")
+		return p.entryBytes.Bytes(), ts, &ns
+	}
+	slog.Debug("ns structure", slog.Any("ns", ns))
+	slog.Debug("Inside Summary Interface of parser without ts returning")
+	return p.entryBytes.Bytes(), nil, &ns
 }
 
 // Help returns the metric name and help text in the current entry.
@@ -478,14 +514,22 @@ func (p *ProtobufParser) Next() (Entry, error) {
 		p.state = EntryType
 	case EntryType:
 		t := p.dec.GetType()
-		if t == dto.MetricType_HISTOGRAM || t == dto.MetricType_GAUGE_HISTOGRAM {
+		switch t {
+		case dto.MetricType_HISTOGRAM, dto.MetricType_GAUGE_HISTOGRAM:
 			if p.ignoreNativeHistograms || !isNativeHistogram(p.dec.GetHistogram()) {
 				p.state = EntrySeries
 				p.fieldPos = -3 // We have not returned anything, let p.Next() increment it to -2.
 				return p.Next()
 			}
 			p.state = EntryHistogram
-		} else {
+		case dto.MetricType_SUMMARY:
+			if !p.convertClassicSummariesToNS {
+				p.state = EntrySeries
+				p.fieldPos = -3 // We have not returned anything, let p.Next() increment it to -2.
+				return p.Next()
+			}
+			p.state = EntrySummary
+		default:
 			p.state = EntrySeries
 		}
 		if err := p.onSeriesOrHistogramUpdate(); err != nil {
@@ -588,6 +632,17 @@ func (p *ProtobufParser) Next() (Entry, error) {
 		if err := p.onSeriesOrHistogramUpdate(); err != nil {
 			return EntryInvalid, err
 		}
+	case EntrySummary:
+		slog.Debug("inside Next() and EntrySummary", slog.Int("fieldPos", p.fieldPos))
+		if err := p.dec.NextMetric(); err != nil {
+			if errors.Is(err, io.EOF) {
+				p.state = EntryInvalid
+				return p.Next()
+			}
+			return EntryInvalid, err
+		}
+		p.state = EntryType
+		return p.Next()
 	default:
 		return EntryInvalid, fmt.Errorf("invalid protobuf parsing state: %d", p.state)
 	}

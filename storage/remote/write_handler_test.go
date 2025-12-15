@@ -37,6 +37,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/prompb"
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
@@ -1471,6 +1472,14 @@ func (m *mockAppendable) AppendHistogramSTZeroSample(_ storage.SeriesRef, l labe
 		m.histograms = append(m.histograms, mockHistogram{l, st, nil, &histogram.FloatHistogram{}})
 	}
 	return storage.SeriesRef(hash), nil
+}
+
+func (*mockAppendable) AppendSummary(_ storage.SeriesRef, _ labels.Labels, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	return 0, errors.New("not implemented")
+}
+
+func (*mockAppendable) AppendSummarySTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *summary.Summary) (storage.SeriesRef, error) {
+	return 0, errors.New("not implemented")
 }
 
 func (m *mockAppendable) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, mp metadata.Metadata) (storage.SeriesRef, error) {

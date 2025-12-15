@@ -49,6 +49,7 @@ import (
 	"math/bits"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 const (
@@ -233,6 +234,10 @@ func (*xorAppender) AppendFloatHistogram(*FloatHistogramAppender, int64, *histog
 	panic("appended a float histogram sample to a float chunk")
 }
 
+func (*xorAppender) AppendSummary(*SummaryAppender, int64, *summary.Summary, bool) (Chunk, Appender, error) {
+	panic("appended a summary sample to a float chunk")
+}
+
 type xorIterator struct {
 	br       bstreamReader
 	numTotal uint16
@@ -270,6 +275,10 @@ func (*xorIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogr
 }
 
 func (*xorIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	panic("cannot call xorIterator.AtFloatHistogram")
+}
+
+func (*xorIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
 	panic("cannot call xorIterator.AtFloatHistogram")
 }
 
