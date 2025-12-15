@@ -19,6 +19,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/summary"
+	"github.com/prometheus/prometheus/model/value"
 )
 
 type SummaryChunk struct {
@@ -64,6 +65,10 @@ func (c *SummaryChunk) iterator(it Iterator) *summaryIterator {
 		return summaryIter
 	}
 	return newSummaryIterator(c.b.bytes())
+}
+
+func (c *SummaryChunk) Iterator(it Iterator) Iterator {
+	return c.iterator(it)
 }
 
 func newSummaryIterator(b []byte) *summaryIterator {
@@ -119,6 +124,33 @@ type SummaryAppender struct {
 	quantileValues []xorValue
 }
 
+func (a *SummaryAppender) NumSamples() int {
+	return int(binary.BigEndian.Uint16(a.b.bytes()))
+}
+
+func (a *SummaryAppender) appendable(s *summary.Summary) (
+	okToAppend bool,
+) {
+	if a.NumSamples() > 0 {
+		return okToAppend
+	}
+	if value.IsStaleNaN(s.Sum) {
+		// This is a stale sample whose buckets and spans don't matter.
+		okToAppend = true
+		return okToAppend
+	}
+	if value.IsStaleNaN(a.sum.value) {
+		// If the last sample was stale, then we can only accept stale
+		// samples in this chunk.
+		return okToAppend
+	}
+
+	if s.Count < a.cnt {
+		return okToAppend
+	}
+
+	return true
+}
 func (*SummaryAppender) Append(int64, float64) {
 	panic("appended a float sample to a summary chunk")
 }
@@ -153,4 +185,42 @@ type summaryIterator struct {
 	quantileValues         []float64
 	quantileValuesLeading  []uint8
 	quantileValuesTrailing []uint8
+
+	err error
+}
+
+func (*summaryIterator) Reset(b []byte) {
+	panic("cannot call summaryIterator.At")
+}
+
+func (*summaryIterator) At() (int64, float64) {
+	panic("cannot call summaryIterator.At")
+}
+
+func (*summaryIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
+	panic("cannot call summaryIterator.AtHistogram")
+}
+
+func (*summaryIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	panic("cannot call summaryIterator.AtFloatHistogram")
+}
+
+func (*summaryIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("not implemented")
+}
+
+func (*summaryIterator) Next() ValueType {
+	panic("not implemented")
+}
+
+func (*summaryIterator) Seek(t int64) ValueType {
+	panic("not implemented")
+}
+
+func (it *summaryIterator) AtT() int64 {
+	return it.t
+}
+
+func (it *summaryIterator) Err() error {
+	return it.err
 }

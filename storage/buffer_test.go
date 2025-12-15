@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
 )
@@ -398,6 +399,10 @@ func (*mockSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *
 	return 0, nil // Not really mocked.
 }
 
+func (*mockSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	return 0, nil // Not really mocked.
+}
+
 func (*mockSeriesIterator) AtT() int64 {
 	return 0 // Not really mocked.
 }
@@ -422,6 +427,9 @@ func (it *fakeSeriesIterator) AtHistogram(*histogram.Histogram) (int64, *histogr
 
 func (it *fakeSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return it.idx * it.step, &histogram.FloatHistogram{} // Value doesn't matter.
+}
+func (it *fakeSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	return it.idx * it.step, &summary.Summary{} // Value doesn't matter.
 }
 
 func (it *fakeSeriesIterator) AtT() int64 {

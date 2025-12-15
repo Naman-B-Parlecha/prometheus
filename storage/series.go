@@ -20,6 +20,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 )
@@ -136,6 +137,9 @@ func (it *listSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64
 func (it *listSeriesIterator) AtT() int64 {
 	s := it.samples.Get(it.idx)
 	return s.T()
+}
+func (it *listSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("listSeriesIterator.AtSummary not implemented")
 }
 
 func (it *listSeriesIterator) Next() chunkenc.ValueType {
@@ -439,7 +443,7 @@ func (e errChunksIterator) Err() error    { return e.err }
 // ExpandSamples iterates over all samples in the iterator, buffering all in slice.
 // Optionally it takes samples constructor, useful when you want to compare sample slices with different
 // sample implementations. if nil, sample type from this package will be used.
-func ExpandSamples(iter chunkenc.Iterator, newSampleFn func(t int64, f float64, h *histogram.Histogram, fh *histogram.FloatHistogram) chunks.Sample) ([]chunks.Sample, error) {
+func ExpandSamples(iter chunkenc.Iterator, newSampleFn func(t int64, f float64, h *histogram.Histogram, fh *histogram.FloatHistogram, s *summary.Summary) chunks.Sample) ([]chunks.Sample, error) {
 	if newSampleFn == nil {
 		newSampleFn = func(t int64, f float64, h *histogram.Histogram, fh *histogram.FloatHistogram) chunks.Sample {
 			switch {

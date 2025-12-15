@@ -1352,3 +1352,7 @@ func resize[T any](items []T, n int) []T {
 	}
 	return items[:n]
 }
+
+func (it *histogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("cannot call histogramIterator.AtSummary")
+}

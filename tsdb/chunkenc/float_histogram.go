@@ -1154,3 +1154,7 @@ func (it *floatHistogramIterator) readXor(v *float64, leading, trailing *uint8) 
 	}
 	return true
 }
+
+func (it *floatHistogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("cannot call floatHistogramIterator.AtSummary")
+}

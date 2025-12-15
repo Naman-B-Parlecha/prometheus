@@ -31,6 +31,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/prompb"
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
@@ -564,6 +565,11 @@ func (c *concreteSeriesIterator) AtT() int64 {
 	return c.series.floats[c.floatsCur].Timestamp
 }
 
+func (*concreteSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("concreteSeriesIterator.AtSummary not implemented")
+
+}
+
 const noTS = int64(math.MaxInt64)
 
 // Next implements chunkenc.Iterator.
@@ -818,6 +824,9 @@ func (it *chunkedSeriesIterator) reset(chunks []prompb.Chunk, mint, maxt int64) 
 
 func (it *chunkedSeriesIterator) At() (ts int64, v float64) {
 	return it.cur.At()
+}
+func (*chunkedSeriesIterator) AtSummary(h *summary.Summary) (int64, *summary.Summary) {
+	panic("chunkedSeriesIterator.AtSummary not implmented")
 }
 
 func (it *chunkedSeriesIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {

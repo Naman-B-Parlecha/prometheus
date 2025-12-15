@@ -278,6 +278,10 @@ func (*xorIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogr
 	panic("cannot call xorIterator.AtFloatHistogram")
 }
 
+func (*xorIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("cannot call xorIterator.AtFloatHistogram")
+}
+
 func (it *xorIterator) AtT() int64 {
 	return it.t
 }

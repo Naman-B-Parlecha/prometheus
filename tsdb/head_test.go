@@ -745,7 +745,7 @@ func TestHead_ReadWAL(t *testing.T) {
 			// Verify samples and exemplar for series 10.
 			c, _, _, err := s10.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
 			require.NoError(t, err)
-			require.Equal(t, []sample{{100, 2, nil, nil}, {101, 5, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
+			require.Equal(t, []sample{{100, 2, nil, nil, nil}, {101, 5, nil, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
 
 			q, err := head.ExemplarQuerier(context.Background())
 			require.NoError(t, err)
@@ -758,14 +758,14 @@ func TestHead_ReadWAL(t *testing.T) {
 			// Verify samples for series 50
 			c, _, _, err = s50.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
 			require.NoError(t, err)
-			require.Equal(t, []sample{{101, 6, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
+			require.Equal(t, []sample{{101, 6, nil, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
 
 			// Verify records for series 100 and its duplicate, series 101.
 			// The samples before the new series record should be discarded since a duplicate record
 			// is only possible when old samples were compacted.
 			c, _, _, err = s100.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
 			require.NoError(t, err)
-			require.Equal(t, []sample{{101, 7, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
+			require.Equal(t, []sample{{101, 7, nil, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
 
 			q, err = head.ExemplarQuerier(context.Background())
 			require.NoError(t, err)
@@ -841,8 +841,8 @@ func TestHead_WALMultiRef(t *testing.T) {
 	// The samples before the new ref should be discarded since Head truncation
 	// happens only after compacting the Head.
 	require.Equal(t, map[string][]chunks.Sample{`{foo="bar"}`: {
-		sample{1700, 3, nil, nil},
-		sample{2000, 4, nil, nil},
+		sample{1700, 3, nil, nil, nil},
+		sample{2000, 4, nil, nil, nil},
 	}}, series)
 }
 
@@ -1859,7 +1859,7 @@ func TestDeleteUntilCurMax(t *testing.T) {
 	it = exps.Iterator(nil)
 	resSamples, err := storage.ExpandSamples(it, newSample)
 	require.NoError(t, err)
-	require.Equal(t, []chunks.Sample{sample{11, 1, nil, nil}}, resSamples)
+	require.Equal(t, []chunks.Sample{sample{11, 1, nil, nil, nil}}, resSamples)
 	for res.Next() {
 	}
 	require.NoError(t, res.Err())

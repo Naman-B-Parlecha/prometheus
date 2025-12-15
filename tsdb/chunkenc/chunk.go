@@ -159,6 +159,7 @@ type Iterator interface {
 	// Err returns the current error. It should be used only after the
 	// iterator is exhausted, i.e. `Next` or `Seek` have returned ValNone.
 	Err() error
+	AtSummary(*summary.Summary) (int64, *summary.Summary)
 }
 
 // ValueType defines the type of a value an Iterator points to.
@@ -248,6 +249,9 @@ func (*mockSeriesIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.
 func (*mockSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return math.MinInt64, nil
 }
+func (*mockSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	return math.MinInt64, nil
+}
 
 func (it *mockSeriesIterator) AtT() int64 {
 	return it.timeStamps[it.currIndex]
@@ -282,6 +286,9 @@ func (nopIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogra
 }
 func (nopIterator) AtT() int64 { return math.MinInt64 }
 func (nopIterator) Err() error { return nil }
+func (nopIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	return math.MinInt64, nil
+}
 
 // Pool is used to create and reuse chunk references to avoid allocations.
 type Pool interface {

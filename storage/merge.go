@@ -23,6 +23,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	tsdb_errors "github.com/prometheus/prometheus/tsdb/errors"
@@ -597,6 +598,10 @@ func (c *chainSampleIterator) AtT() int64 {
 		panic("chainSampleIterator.AtT called before first .Next or after .Next returned false.")
 	}
 	return c.curr.AtT()
+}
+
+func (chainSampleIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("chainSampleIterator.AtSummary called but it is not implemented.")
 }
 
 func (c *chainSampleIterator) Next() chunkenc.ValueType {

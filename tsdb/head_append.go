@@ -1868,7 +1868,7 @@ func (a *headAppenderBase) commitFloatHistograms(b *appendBatch, acc *appenderCo
 	}
 }
 
-func (a *headAppender) commitSummaries(b *appendBatch, acc *appenderCommitContext) {
+func (a *headAppenderBase) commitSummaries(b *appendBatch, acc *appenderCommitContext) {
 	var ok, chunkCreated bool
 	var series *memSeries
 
@@ -2252,7 +2252,8 @@ func (s *memSeries) appendFloatHistogram(t int64, fh *histogram.FloatHistogram, 
 }
 
 func (s *memSeries) appendSummary(t int64, sm *summary.Summary, appendID uint64, o chunkOpts) (sampleInOrder, chunkCreated bool) {
-prevApp, _ := s.app.(*chunkenc.FloatHistogramAppender)
+	// prevApp, _ := s.app.(*chunkenc.FloatHistogramAppender)
+	panic("not implemented")
 }
 
 // appendPreprocessor takes care of cutting new XOR chunks and m-mapping old ones. XOR chunks are cut based on the
@@ -2402,6 +2403,7 @@ func (s *memSeries) histogramsAppendPreprocessor(t int64, e chunkenc.Encoding, o
 }
 
 func (s *memSeries) summaryAppendPreprocessor(t int64, e chunkenc.Encoding, o chunkOpts) (c *memChunk, sampleInOrder, chunkCreated bool) {
+	panic("not implemented")
 }
 
 // computeChunkEndTime estimates the end timestamp based the beginning of a
