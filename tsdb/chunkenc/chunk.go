@@ -30,6 +30,7 @@ const (
 	EncXOR
 	EncHistogram
 	EncFloatHistogram
+	EncSummary
 )
 
 func (e Encoding) String() string {
@@ -42,6 +43,8 @@ func (e Encoding) String() string {
 		return "histogram"
 	case EncFloatHistogram:
 		return "floathistogram"
+	case EncSummary:
+		return "summary"
 	}
 	return "<unknown>"
 }
@@ -165,6 +168,7 @@ const (
 	ValFloat                           // A simple float, retrieved with At.
 	ValHistogram                       // A histogram, retrieve with AtHistogram, but AtFloatHistogram works, too.
 	ValFloatHistogram                  // A floating-point histogram, retrieve with AtFloatHistogram.
+	ValSummary                         // A summary, retrieve with AtSummary.
 )
 
 func (v ValueType) String() string {
@@ -177,6 +181,8 @@ func (v ValueType) String() string {
 		return "histogram"
 	case ValFloatHistogram:
 		return "floathistogram"
+	case ValSummary:
+		return "summary"
 	default:
 		return "unknown"
 	}
@@ -190,6 +196,8 @@ func (v ValueType) ChunkEncoding() Encoding {
 		return EncHistogram
 	case ValFloatHistogram:
 		return EncFloatHistogram
+	case ValSummary:
+		return EncSummary
 	default:
 		return EncNone
 	}
@@ -203,6 +211,8 @@ func (v ValueType) NewChunk() (Chunk, error) {
 		return NewHistogramChunk(), nil
 	case ValFloatHistogram:
 		return NewFloatHistogramChunk(), nil
+	case ValSummary:
+		return NewSummaryChunk(), nil
 	default:
 		return nil, fmt.Errorf("value type %v unsupported", v)
 	}

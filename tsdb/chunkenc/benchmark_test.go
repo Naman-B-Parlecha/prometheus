@@ -1,0 +1,73 @@
+// Copyright 2017 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package chunkenc
+
+import (
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/prometheus/prometheus/model/summary"
+	"github.com/prometheus/prometheus/model/timestamp"
+	"github.com/stretchr/testify/require"
+)
+
+type sampleCase struct {
+	name    string
+	samples []summaryRet
+}
+
+type fmtCase struct {
+	name       string
+	newChunkFn func() Chunk
+}
+
+func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampleCase)) {
+	const numSample = 120
+
+	d, err := time.Parse(time.DateTime, "2025-12-29 02:55:05")
+	require.NoError(b, err)
+
+	var initT = timestamp.FromTime(d)
+	sampleCases := []sampleCase{
+		{
+			name: "vt=constant",
+			samples: func() (ret []summaryRet) {
+				t := initT
+				for i := 0; i < numSample; i++ {
+					t += 15000 // 15s
+					ret = append(ret, summaryRet{
+						t: t,
+						s: &summary.Summary{
+							Count:           1,
+							Sum:             1,
+							QuantileValues:  []float64{1, 2, 3},
+							QuantileTargets: []float64{0.5, 0.9, 0.99},
+						},
+					})
+				}
+				return ret
+			}(),
+		},
+	}
+	for _, f := range []fmtCase{
+		{name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
+	} {
+		for _, s := range sampleCases {
+			b.Run(fmt.Sprintf("fmt=%s/%s", f.name, s.name), func(b *testing.B) {
+				fn(b, f, s)
+			})
+		}
+	}
+}
