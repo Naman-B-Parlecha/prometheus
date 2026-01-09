@@ -14,10 +14,13 @@
 package chunkenc
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/stretchr/testify/require"
@@ -91,6 +94,58 @@ func BenchmarkAppender(b *testing.B) {
 			// NOTE: Some buffered implementations only encode on Bytes().
 			b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
 			require.Equal(b, len(s.samples), c.NumSamples())
+		}
+	})
+}
+
+func BenchmarkIterator(b *testing.B) {
+	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
+		b.ReportAllocs()
+		c := f.newChunkFn()
+
+		app, _ := c.Appender()
+		a := app.(*SummaryAppender)
+		for _, p := range s.samples {
+			a.AppendSummary(p.t, p.s)
+		}
+		// what we do is take bytes and if anything is buffered right we
+		// reinitialize the chunk
+		c.Reset(c.Bytes())
+		it := c.Iterator(nil)
+
+		require.Equal(b, len(s.samples), c.NumSamples())
+		var got []summaryRet
+		for it.Next() == ValSummary {
+			t, s := it.AtSummary(nil)
+
+			got = append(got, summaryRet{t: t, s: s})
+		}
+		if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
+			require.NoError(b, err)
+		}
+		if diff := cmp.Diff(s.samples, got, cmp.AllowUnexported(summaryRet{}), cmp.Comparer(func(a, b summaryRet) bool {
+			return summary.Equal(a.s, b.s)
+		})); diff != "" {
+			b.Fatalf("mismatch (-want +got):\n%s", diff)
+		}
+
+		var sink *summary.Summary
+		// Measure decoding efficiency.
+		for b.Loop() {
+			// just in case some buffered implementation
+			// we reinitialize the chunk
+			c.Reset(c.Bytes())
+			b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
+
+			it := c.Iterator(it)
+			for it.Next() == ValSummary {
+				_, s := it.AtSummary(nil)
+				sink = s
+			}
+			if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
+				require.NoError(b, err)
+			}
+			_ = sink
 		}
 	})
 }
