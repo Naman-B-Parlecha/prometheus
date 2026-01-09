@@ -512,6 +512,10 @@ func xorRead(br *bstreamReader, value *float64, leading, trailing *uint8) error 
 	return nil
 }
 
-func (*xorAppender) AppendSummary(int64, *summary.Summary, bool) (Chunk, Appender, error) {
+func (*xorAppender) AppendSummary(int64, *summary.Summary) (Chunk, Appender, error) {
 	panic("appended a summary sample to a float chunk")
+}
+
+func (*xorIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("cannot call xorIterator.AtSummary")
 }

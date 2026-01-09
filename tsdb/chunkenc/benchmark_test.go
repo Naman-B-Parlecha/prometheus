@@ -86,7 +86,7 @@ func BenchmarkAppender(b *testing.B) {
 			app, _ := c.Appender()
 			a := app.(*SummaryAppender)
 			for _, p := range s.samples {
-				a.AppendSummary(p.t, p.s, false)
+				a.AppendSummary(p.t, p.s)
 			}
 			// NOTE: Some buffered implementations only encode on Bytes().
 			b.ReportMetric(float64(len(c.Bytes())), "B/chunk")

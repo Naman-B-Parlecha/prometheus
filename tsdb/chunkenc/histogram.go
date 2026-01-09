@@ -739,7 +739,7 @@ func (*HistogramAppender) AppendFloatHistogram(*FloatHistogramAppender, int64, *
 	panic("appended a float histogram sample to a histogram chunk")
 }
 
-func (*HistogramAppender) AppendSummary(int64, *summary.Summary, bool) (Chunk, Appender, error) {
+func (*HistogramAppender) AppendSummary(int64, *summary.Summary) (Chunk, Appender, error) {
 	panic("appended a summary sample to a histogram chunk")
 }
 
@@ -918,6 +918,10 @@ func (it *histogramIterator) Seek(t int64) ValueType {
 
 func (*histogramIterator) At() (int64, float64) {
 	panic("cannot call histogramIterator.At")
+}
+
+func (*histogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("cannot call histogramIterator.AtSummary")
 }
 
 func (it *histogramIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
