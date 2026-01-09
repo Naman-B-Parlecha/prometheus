@@ -63,6 +63,7 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 	}
 	for _, f := range []fmtCase{
 		{name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
+		// {name: "ClassicSummary", newChunkFn: func() Chunk { return NewXORChunk() }},
 	} {
 		for _, s := range sampleCases {
 			b.Run(fmt.Sprintf("fmt=%s/%s", f.name, s.name), func(b *testing.B) {
@@ -70,4 +71,26 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 			})
 		}
 	}
+}
+
+func BenchmarkAppender(b *testing.B) {
+	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			// here we should only bench mark like appending.
+			// avoid including chunk creation etc. which is overhead and will
+			// give wrong benchmark
+			c := f.newChunkFn()
+
+			app, _ := c.Appender()
+			a := app.(*SummaryAppender)
+			for _, p := range s.samples {
+				a.AppendSummary(p.t, p.s, false)
+			}
+			// NOTE: Some buffered implementations only encode on Bytes().
+			b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
+			require.Equal(b, len(s.samples), c.NumSamples())
+		}
+	})
 }

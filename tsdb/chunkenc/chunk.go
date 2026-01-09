@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 // Encoding is the identifier for a chunk encoding.
@@ -119,6 +120,7 @@ type Appender interface {
 	// The Appender app that can be used for the next append is always returned.
 	AppendHistogram(prev *HistogramAppender, t int64, h *histogram.Histogram, appendOnly bool) (c Chunk, isRecoded bool, app Appender, err error)
 	AppendFloatHistogram(prev *FloatHistogramAppender, t int64, h *histogram.FloatHistogram, appendOnly bool) (c Chunk, isRecoded bool, app Appender, err error)
+	AppendSummary(t int64, s *summary.Summary, appendOnly bool) (c Chunk, app Appender, err error)
 }
 
 // Iterator is a simple iterator that can only get the next value.

@@ -20,6 +20,7 @@ import (
 	"math"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 )
 
@@ -736,6 +737,10 @@ func (a *HistogramAppender) writeSumDelta(v float64) {
 
 func (*HistogramAppender) AppendFloatHistogram(*FloatHistogramAppender, int64, *histogram.FloatHistogram, bool) (Chunk, bool, Appender, error) {
 	panic("appended a float histogram sample to a histogram chunk")
+}
+
+func (*HistogramAppender) AppendSummary(int64, *summary.Summary, bool) (Chunk, Appender, error) {
+	panic("appended a summary sample to a histogram chunk")
 }
 
 func (a *HistogramAppender) AppendHistogram(prev *HistogramAppender, t int64, h *histogram.Histogram, appendOnly bool) (Chunk, bool, Appender, error) {

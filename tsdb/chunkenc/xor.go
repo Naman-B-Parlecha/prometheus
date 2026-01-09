@@ -49,6 +49,7 @@ import (
 	"math/bits"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 const (
@@ -509,4 +510,8 @@ func xorRead(br *bstreamReader, value *float64, leading, trailing *uint8) error 
 	vbits ^= bits << newTrailing
 	*value = math.Float64frombits(vbits)
 	return nil
+}
+
+func (*xorAppender) AppendSummary(int64, *summary.Summary, bool) (Chunk, Appender, error) {
+	panic("appended a summary sample to a float chunk")
 }
