@@ -76,6 +76,11 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 	}
 }
 
+// export bench=bench/appendSummary && go test \
+// 	  -run '^$' -bench '^BenchmarkAppender' \
+// 	  -benchtime 1s -count 6 -cpu 2 -timeout 999m \
+// 	  | tee ${bench}.txt
+
 func BenchmarkAppender(b *testing.B) {
 	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
 		b.ReportAllocs()
@@ -97,6 +102,11 @@ func BenchmarkAppender(b *testing.B) {
 		}
 	})
 }
+
+// export bench=bench/iterSummary && go test \
+//   -run '^$' -bench '^BenchmarkIterator' \
+//   -benchtime 1s -count 6 -cpu 2 -timeout 999m \
+//   | tee ${bench}.txt
 
 func BenchmarkIterator(b *testing.B) {
 	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
