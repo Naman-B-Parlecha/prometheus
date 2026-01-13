@@ -45,7 +45,7 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 	var initT = timestamp.FromTime(d)
 	sampleCases := []sampleCase{
 		{
-			name: "vt=constant",
+			name: "constant",
 			samples: func() (ret []summaryRet) {
 				t := initT
 				for i := 0; i < numSample; i++ {
@@ -63,13 +63,51 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 				return ret
 			}(),
 		},
+		{
+			name: "step increase",
+			samples: func() (ret []summaryRet) {
+				t := initT
+				for i := 0; i < numSample; i++ {
+					t += 15000 // 15s
+					ret = append(ret, summaryRet{
+						t: t,
+						s: &summary.Summary{
+							Count:           float64(i * 5),
+							Sum:             float64(i * 5),
+							QuantileValues:  []float64{float64(i) * 5, 5 + float64(i)*5, 10 + float64(i)*5},
+							QuantileTargets: []float64{0.5, 0.9, 0.99},
+						},
+					})
+				}
+				return ret
+			}(),
+		},
+		{
+			name: "more quantiles",
+			samples: func() (ret []summaryRet) {
+				t := initT
+				for i := 0; i < numSample; i++ {
+					t += 15000 // 15s
+					ret = append(ret, summaryRet{
+						t: t,
+						s: &summary.Summary{
+							Count:           float64(i + i*5),
+							Sum:             float64(i + i*5),
+							QuantileValues:  []float64{float64(i) * 5, 5 + float64(i)*5, 10 + float64(i)*5, 15 + float64(i)*5, 20 + float64(i)*5},
+							QuantileTargets: []float64{0.5, 0.75, 0.9, 0.95, 0.99},
+						},
+					})
+				}
+				return ret
+			}(),
+		},
 	}
 	for _, f := range []fmtCase{
-		{name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
-		// {name: "ClassicSummary", newChunkFn: func() Chunk { return NewXORChunk() }},
+		// {name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
+		{name: "ClassicSummary", newChunkFn: func() Chunk { return NewXORChunk() }},
 	} {
 		for _, s := range sampleCases {
-			b.Run(fmt.Sprintf("fmt=%s/%s", f.name, s.name), func(b *testing.B) {
+			b.Run(fmt.Sprintf("%s", s.name), func(b *testing.B) {
 				fn(b, f, s)
 			})
 		}
@@ -83,22 +121,59 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 
 func BenchmarkAppender(b *testing.B) {
 	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
-		b.ReportAllocs()
-
-		for b.Loop() {
-			// here we should only bench mark like appending.
-			// avoid including chunk creation etc. which is overhead and will
-			// give wrong benchmark
-			c := f.newChunkFn()
-
-			app, _ := c.Appender()
-			a := app.(*SummaryAppender)
-			for _, p := range s.samples {
-				a.AppendSummary(p.t, p.s)
+		switch f.name {
+		case "NativeSummary":
+			b.ReportAllocs()
+			for b.Loop() {
+				c := f.newChunkFn()
+				app, _ := c.Appender()
+				a := app.(*SummaryAppender)
+				for _, p := range s.samples {
+					newChunk, newApp, err := a.AppendSummary(p.t, p.s)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if newChunk != nil {
+						a = newApp.(*SummaryAppender)
+						c = newChunk
+					}
+				}
+				b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
 			}
-			// NOTE: Some buffered implementations only encode on Bytes().
-			b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
-			require.Equal(b, len(s.samples), c.NumSamples())
+		case "ClassicSummary":
+			b.ReportAllocs()
+			numQuantiles := len(s.samples[0].s.QuantileTargets)
+			for b.Loop() {
+				sumC := NewXORChunk()
+				countC := NewXORChunk()
+				quantileChunks := make([]*XORChunk, numQuantiles)
+				for i := range numQuantiles {
+					quantileChunks[i] = NewXORChunk()
+				}
+
+				sumAppender, _ := sumC.Appender()
+				countAppender, _ := countC.Appender()
+				quantileAppenders := make([]Appender, numQuantiles)
+				for i := range numQuantiles {
+					quantileAppenders[i], _ = quantileChunks[i].Appender()
+				}
+
+				for _, p := range s.samples {
+					sumAppender.Append(p.t, p.s.Sum)
+					countAppender.Append(p.t, p.s.Count)
+					for i, qv := range p.s.QuantileValues {
+						quantileAppenders[i].Append(p.t, qv)
+					}
+				}
+
+				totalBytes := len(sumC.Bytes()) + len(countC.Bytes())
+				for _, qc := range quantileChunks {
+					totalBytes += len(qc.Bytes())
+				}
+				b.ReportMetric(float64(totalBytes), "B/chunk")
+			}
+		default:
+			panic("not possible :)")
 		}
 	})
 }
