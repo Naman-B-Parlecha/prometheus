@@ -1,0 +1,300 @@
+// Copyright 2017 The Prometheus Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package chunkenc
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"testing"
+	"time"
+
+	"github.com/prometheus/prometheus/model/summary"
+	"github.com/prometheus/prometheus/model/timestamp"
+	"github.com/stretchr/testify/require"
+)
+
+type sampleCase struct {
+	name    string
+	samples []summaryRet
+}
+
+type fmtCase struct {
+	name       string
+	newChunkFn func() Chunk
+}
+
+func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampleCase)) {
+	const numSample = 120
+
+	d, err := time.Parse(time.DateTime, "2025-12-29 02:55:05")
+	require.NoError(b, err)
+
+	var initT = timestamp.FromTime(d)
+	sampleCases := []sampleCase{
+		{
+			name: "constant",
+			samples: func() (ret []summaryRet) {
+				t := initT
+				for i := 0; i < numSample; i++ {
+					t += 15000 // 15s
+					ret = append(ret, summaryRet{
+						t: t,
+						s: &summary.Summary{
+							Count:           1,
+							Sum:             1,
+							QuantileValues:  []float64{1, 2, 3},
+							QuantileTargets: []float64{0.5, 0.9, 0.99},
+						},
+					})
+				}
+				return ret
+			}(),
+		},
+		{
+			name: "step increase",
+			samples: func() (ret []summaryRet) {
+				t := initT
+				for i := 0; i < numSample; i++ {
+					t += 15000 // 15s
+					ret = append(ret, summaryRet{
+						t: t,
+						s: &summary.Summary{
+							Count:           float64(i * 5),
+							Sum:             float64(i * 5),
+							QuantileValues:  []float64{float64(i) * 5, 5 + float64(i)*5, 10 + float64(i)*5},
+							QuantileTargets: []float64{0.5, 0.9, 0.99},
+						},
+					})
+				}
+				return ret
+			}(),
+		},
+		{
+			name: "more quantiles",
+			samples: func() (ret []summaryRet) {
+				t := initT
+				for i := 0; i < numSample; i++ {
+					t += 15000 // 15s
+					ret = append(ret, summaryRet{
+						t: t,
+						s: &summary.Summary{
+							Count:           float64(i + i*5),
+							Sum:             float64(i + i*5),
+							QuantileValues:  []float64{float64(i) * 5, 5 + float64(i)*5, 10 + float64(i)*5, 15 + float64(i)*5, 20 + float64(i)*5},
+							QuantileTargets: []float64{0.5, 0.75, 0.9, 0.95, 0.99},
+						},
+					})
+				}
+				return ret
+			}(),
+		},
+	}
+	for _, f := range []fmtCase{
+		{name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
+		// {name: "ClassicSummary", newChunkFn: func() Chunk { return NewXORChunk() }},
+	} {
+		for _, s := range sampleCases {
+			b.Run(fmt.Sprintf("%s", s.name), func(b *testing.B) {
+				fn(b, f, s)
+			})
+		}
+	}
+}
+
+// export bench=bench/appendSummary && go test \
+// 	  -run '^$' -bench '^BenchmarkAppender' \
+// 	  -benchtime 1s -count 6 -cpu 2 -timeout 999m \
+// 	  | tee ${bench}.txt
+
+func BenchmarkAppender(b *testing.B) {
+	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
+		switch f.name {
+		case "NativeSummary":
+			b.ReportAllocs()
+			for b.Loop() {
+				c := f.newChunkFn()
+				app, _ := c.Appender()
+				a := app.(*SummaryAppender)
+				for _, p := range s.samples {
+					a.AppendSummary(p.t, p.s)
+					// no new Appender for now since we are passing same samples no
+					// disorder
+					// newChunk, newApp, err := a.AppendSummary(p.t, p.s)
+					// if err != nil {
+					// 	b.Fatal(err)
+					// }
+					// if newChunk != nil {
+					// 	a = newApp.(*SummaryAppender)
+					// 	c = newChunk
+					// }
+				}
+				b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
+			}
+		case "ClassicSummary":
+			b.ReportAllocs()
+			numQuantiles := len(s.samples[0].s.QuantileTargets)
+			for b.Loop() {
+				sumC := NewXORChunk()
+				countC := NewXORChunk()
+				quantileChunks := make([]*XORChunk, numQuantiles)
+				for i := range numQuantiles {
+					quantileChunks[i] = NewXORChunk()
+				}
+
+				sumAppender, _ := sumC.Appender()
+				countAppender, _ := countC.Appender()
+				quantileAppenders := make([]Appender, numQuantiles)
+				for i := range numQuantiles {
+					quantileAppenders[i], _ = quantileChunks[i].Appender()
+				}
+
+				for _, p := range s.samples {
+					sumAppender.Append(p.t, p.s.Sum)
+					countAppender.Append(p.t, p.s.Count)
+					for i, qv := range p.s.QuantileValues {
+						quantileAppenders[i].Append(p.t, qv)
+					}
+				}
+
+				totalBytes := len(sumC.Bytes()) + len(countC.Bytes())
+				for _, qc := range quantileChunks {
+					totalBytes += len(qc.Bytes())
+				}
+				b.ReportMetric(float64(totalBytes), "B/chunk")
+			}
+		default:
+			panic("not possible :)")
+		}
+	})
+}
+
+// export bench=bench/iterSummary && go test \
+//   -run '^$' -bench '^BenchmarkIterator' \
+//   -benchtime 1s -count 6 -cpu 2 -timeout 999m \
+//   | tee ${bench}.txt
+
+func BenchmarkIterator(b *testing.B) {
+	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
+		switch f.name {
+		case "NativeSummary":
+			b.ReportAllocs()
+			c := f.newChunkFn()
+
+			app, _ := c.Appender()
+			a := app.(*SummaryAppender)
+			for _, p := range s.samples {
+				a.AppendSummary(p.t, p.s)
+			}
+			// what we do is take bytes and if anything is buffered right we
+			// reinitialize the chunk in simple words bring the iterator to start
+			c.Reset(c.Bytes())
+			require.Equal(b, len(s.samples), c.NumSamples())
+			var sink *summary.Summary
+			// Measure decoding efficiency.
+			for b.Loop() {
+				// just in case some buffered implementation
+				// we reinitialize the chunk
+				c.Reset(c.Bytes())
+				b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
+
+				it := c.Iterator(nil)
+				ns := &summary.Summary{}
+				for it.Next() == ValSummary {
+					_, s := it.AtSummary(ns)
+					sink = s
+				}
+				if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
+					require.NoError(b, err)
+				}
+				// for tell to see sink alloc also in benchmark
+				_ = sink
+			}
+		case "ClassicSummary":
+			b.ReportAllocs()
+			numQuantiles := len(s.samples[0].s.QuantileTargets)
+
+			// Setup: Encode data ONCE outside the benchmark loop
+			sumC := NewXORChunk()
+			countC := NewXORChunk()
+			quantileChunks := make([]*XORChunk, numQuantiles)
+			for i := range numQuantiles {
+				quantileChunks[i] = NewXORChunk()
+			}
+
+			sumAppender, _ := sumC.Appender()
+			countAppender, _ := countC.Appender()
+			quantileAppenders := make([]Appender, numQuantiles)
+			for i := range numQuantiles {
+				quantileAppenders[i], _ = quantileChunks[i].Appender()
+			}
+
+			for _, p := range s.samples {
+				sumAppender.Append(p.t, p.s.Sum)
+				countAppender.Append(p.t, p.s.Count)
+				for i, qv := range p.s.QuantileValues {
+					quantileAppenders[i].Append(p.t, qv)
+				}
+			}
+
+			require.Equal(b, len(s.samples), sumC.NumSamples())
+			require.Equal(b, len(s.samples), countC.NumSamples())
+			for i := range numQuantiles {
+				require.Equal(b, len(s.samples), quantileChunks[i].NumSamples())
+			}
+
+			totalBytes := len(sumC.Bytes()) + len(countC.Bytes())
+			for _, qc := range quantileChunks {
+				totalBytes += len(qc.Bytes())
+			}
+
+			var sink float64
+
+			for b.Loop() {
+				b.ReportMetric(float64(totalBytes), "B/chunk")
+
+				// reseting byte stream due to buffer
+				sumC.Reset(sumC.Bytes())
+				countC.Reset(countC.Bytes())
+				for _, qc := range quantileChunks {
+					qc.Reset(qc.Bytes())
+				}
+
+				sumIter := sumC.Iterator(nil)
+				countIter := countC.Iterator(nil)
+				quantIters := make([]Iterator, numQuantiles)
+				for i := range numQuantiles {
+					quantIters[i] = quantileChunks[i].Iterator(nil)
+				}
+
+				// Decode all values
+				for sumIter.Next() != ValNone {
+					_, v := sumIter.At()
+					sink = v
+				}
+				for countIter.Next() != ValNone {
+					_, v := countIter.At()
+					sink = v
+				}
+				for _, qIter := range quantIters {
+					for qIter.Next() != ValNone {
+						_, v := qIter.At()
+						sink = v
+					}
+				}
+			}
+			_ = sink
+		}
+	})
+}

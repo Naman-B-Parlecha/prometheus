@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 // Encoding is the identifier for a chunk encoding.
@@ -30,6 +31,7 @@ const (
 	EncXOR
 	EncHistogram
 	EncFloatHistogram
+	EncSummary
 )
 
 func (e Encoding) String() string {
@@ -42,6 +44,8 @@ func (e Encoding) String() string {
 		return "histogram"
 	case EncFloatHistogram:
 		return "floathistogram"
+	case EncSummary:
+		return "summary"
 	}
 	return "<unknown>"
 }
@@ -116,6 +120,7 @@ type Appender interface {
 	// The Appender app that can be used for the next append is always returned.
 	AppendHistogram(prev *HistogramAppender, t int64, h *histogram.Histogram, appendOnly bool) (c Chunk, isRecoded bool, app Appender, err error)
 	AppendFloatHistogram(prev *FloatHistogramAppender, t int64, h *histogram.FloatHistogram, appendOnly bool) (c Chunk, isRecoded bool, app Appender, err error)
+	AppendSummary(t int64, s *summary.Summary) (c Chunk, app Appender, err error)
 }
 
 // Iterator is a simple iterator that can only get the next value.
@@ -148,6 +153,7 @@ type Iterator interface {
 	// The method accepts an optional FloatHistogram object which will be
 	// reused when not nil. Otherwise, a new FloatHistogram object will be allocated.
 	AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram)
+	AtSummary(*summary.Summary) (int64, *summary.Summary)
 	// AtT returns the current timestamp.
 	// Before the iterator has advanced, the behaviour is unspecified.
 	AtT() int64
@@ -165,6 +171,7 @@ const (
 	ValFloat                           // A simple float, retrieved with At.
 	ValHistogram                       // A histogram, retrieve with AtHistogram, but AtFloatHistogram works, too.
 	ValFloatHistogram                  // A floating-point histogram, retrieve with AtFloatHistogram.
+	ValSummary                         // A summary, retrieve with AtSummary.
 )
 
 func (v ValueType) String() string {
@@ -177,6 +184,8 @@ func (v ValueType) String() string {
 		return "histogram"
 	case ValFloatHistogram:
 		return "floathistogram"
+	case ValSummary:
+		return "summary"
 	default:
 		return "unknown"
 	}
@@ -190,6 +199,8 @@ func (v ValueType) ChunkEncoding() Encoding {
 		return EncHistogram
 	case ValFloatHistogram:
 		return EncFloatHistogram
+	case ValSummary:
+		return EncSummary
 	default:
 		return EncNone
 	}
@@ -203,6 +214,8 @@ func (v ValueType) NewChunk() (Chunk, error) {
 		return NewHistogramChunk(), nil
 	case ValFloatHistogram:
 		return NewFloatHistogramChunk(), nil
+	case ValSummary:
+		return NewSummaryChunk(), nil
 	default:
 		return nil, fmt.Errorf("value type %v unsupported", v)
 	}
@@ -237,6 +250,10 @@ func (*mockSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *
 	return math.MinInt64, nil
 }
 
+func (*mockSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	return math.MinInt64, nil
+}
+
 func (it *mockSeriesIterator) AtT() int64 {
 	return it.timeStamps[it.currIndex]
 }
@@ -268,6 +285,9 @@ func (nopIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogra
 func (nopIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return math.MinInt64, nil
 }
+func (nopIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	return math.MinInt64, nil
+}
 func (nopIterator) AtT() int64 { return math.MinInt64 }
 func (nopIterator) Err() error { return nil }
 
@@ -282,6 +302,7 @@ type pool struct {
 	xor            sync.Pool
 	histogram      sync.Pool
 	floatHistogram sync.Pool
+	summary        sync.Pool
 }
 
 // NewPool returns a new pool.
@@ -302,6 +323,11 @@ func NewPool() Pool {
 				return &FloatHistogramChunk{b: bstream{}}
 			},
 		},
+		summary: sync.Pool{
+			New: func() any {
+				return &SummaryChunk{b: bstream{}}
+			},
+		},
 	}
 }
 
@@ -314,6 +340,8 @@ func (p *pool) Get(e Encoding, b []byte) (Chunk, error) {
 		c = p.histogram.Get().(*HistogramChunk)
 	case EncFloatHistogram:
 		c = p.floatHistogram.Get().(*FloatHistogramChunk)
+	case EncSummary:
+		c = p.summary.Get().(*SummaryChunk)
 	default:
 		return nil, fmt.Errorf("invalid chunk encoding %q", e)
 	}
@@ -335,6 +363,9 @@ func (p *pool) Put(c Chunk) error {
 	case EncFloatHistogram:
 		_, ok = c.(*FloatHistogramChunk)
 		sp = &p.floatHistogram
+	case EncSummary:
+		_, ok = c.(*SummaryChunk)
+		sp = &p.summary
 	default:
 		return fmt.Errorf("invalid chunk encoding %q", c.Encoding())
 	}
@@ -361,6 +392,8 @@ func FromData(e Encoding, d []byte) (Chunk, error) {
 		return &HistogramChunk{b: bstream{count: 0, stream: d}}, nil
 	case EncFloatHistogram:
 		return &FloatHistogramChunk{b: bstream{count: 0, stream: d}}, nil
+	case EncSummary:
+		return &SummaryChunk{b: bstream{count: 0, stream: d}}, nil
 	}
 	return nil, fmt.Errorf("invalid chunk encoding %q", e)
 }
@@ -374,6 +407,8 @@ func NewEmptyChunk(e Encoding) (Chunk, error) {
 		return NewHistogramChunk(), nil
 	case EncFloatHistogram:
 		return NewFloatHistogramChunk(), nil
+	case EncSummary:
+		return NewSummaryChunk(), nil
 	}
 	return nil, fmt.Errorf("invalid chunk encoding %q", e)
 }
