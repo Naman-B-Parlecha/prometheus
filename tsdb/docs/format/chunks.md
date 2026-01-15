@@ -220,3 +220,72 @@ Float histograms have the same layout as histograms apart from the encoding of s
 │ ts_dod <varbit_int> │ count_xor <varbit_xor> │ zero_count_xor <varbit_xor> │ sum_xor <varbit_xor> │ pos_bucket_0_xor <varbit_xor> │ ... │ pos_bucket_n_xor <varbit_xor> │ neg_bucket_0_xor <varbit_xor> │ ... │ neg_bucket_n_xor <varbit_xor> │
 └─────────────────────┴────────────────────────┴─────────────────────────────┴──────────────────────┴───────────────────────────────┴─────┴───────────────────────────────┴───────────────────────────────┴─────┴───────────────────────────────┘
 ```
+
+## Summary chunk data
+
+Layout
+```
+┌──────────────────────┬──────────────────────────┬────────────────┬──────────────────┐
+│ num_samples <uint16> | quantile_target <data>   │ samples <data> │ padding <x bits> │
+└──────────────────────┴──────────────────────────┴────────────────┴──────────────────┘
+```
+
+Quantile Targets
+
+```
+┌───────────────────────────────────┬────────────────────────────┬────────────────────────────┬─────┬────────────────────────────┐
+│ quantile_target_len <varbit_uint> │ quantile_target_1 <custom> │ quantile_target_2 <custom> │ ... │ quantile_target_n <custom> │
+└───────────────────────────────────┴────────────────────────────┴────────────────────────────┴──────────────────────────────────┘
+```
+
+### Note: 
+The <custom> encoding within the quantile target data is to encode quantile targets in the form of floats. The encoding of a given float value x works as follows:
+
+Create an intermediate value y = x * 1000.
+If 0 ≤ y ≤ 33554430 and if the decimal value of y is integer, store y + 1 as <varbit_uint>.
+Otherwise, store a 0 bit, followed by the 64 bit of the original x encoded as plain <float64>.
+Note that values stored as per (2) will always start with a 1 bit, which allow decoders to recognize this case in contrast to values stores as per (3), which always start with a 0 bit. 
+
+in simple words we do y+1 for (integer) is cuz we use 0 as flag to say that next is a float64(8bytes) value and not a integer, usually 0.5 -> 8bytes but if we 0.5 * 1000 = 500(3bytes) -> less bytes this can be seen in putVarbitUint func we are saving here if we have lets say 0.123123 * 1000 = 123.123 which is not a whole number meaning we will have to store it in float64 value and tell add a flag to avoid confusion in types.
+
+The rational behind this encoding is that most quantile targets are set by humans as decimal numbers with not very many decimal places. In most cases, the encoding will therefore result in a short varbit representation. The upper bound of 33554430 is picked so that the varbit encoded value will take at most 4 bytes.
+
+Samples data:
+```
+┌──────────────────────────┐
+│    sample_0 <data>       │
+├──────────────────────────┤
+│    sample_1 <data>       │
+├──────────────────────────┤
+│    sample_2 <data>       │
+├──────────────────────────┤
+│          ...             │
+├──────────────────────────┤
+│    sample_n <data>       │
+└──────────────────────────┘
+```
+
+#### Sample 0 data:
+
+```
+┌─────────────────┬─────────────────┬───────────────┬────────────────────────────┬─────┬─────────────────────────────┐
+│ ts <varbit_int> │ count <float64> │ sum <float64> │ quantile_value_1 <float64> │ ... │  quantile_value_n <float64> |
+└─────────────────┴─────────────────┴───────────────┴────────────────────────────┴─────┴─────────────────────────────┘
+```
+
+#### Sample 1 data:
+
+```
+┌───────────────────────┬────────────────────────┬──────────────────────┬───────────────────────────────────┬─────┬───────────────────────────────────┐
+│ ts_delta <varbit_int> │ count_xor <varbit_xor> | sum_xor <varbit_xor> │ quantile_value_1_xor <varbit_xor> │ ... │ quantile_value_n_xor <varbit_xor> │
+└───────────────────────┴────────────────────────┴──────────────────────┴───────────────────────────────────┴─────┴───────────────────────────────────┘
+```
+
+#### Sample 2 data and following:
+
+
+```
+┌───────────────────────┬────────────────────────┬──────────────────────┬───────────────────────────────────┬─────┬───────────────────────────────────┐
+│ ts_dod <varbit_int>   │ count_xor <varbit_xor> | sum_xor <varbit_xor> │ quantile_value_1_xor <varbit_xor> │ ... │ quantile_value_n_xor <varbit_xor> │
+└───────────────────────┴────────────────────────┴──────────────────────┴───────────────────────────────────┴─────┴───────────────────────────────────┘
+```
