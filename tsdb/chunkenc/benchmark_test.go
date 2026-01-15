@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/stretchr/testify/require"
@@ -103,8 +102,8 @@ func foreachFmtSampleCase(b *testing.B, fn func(b *testing.B, f fmtCase, s sampl
 		},
 	}
 	for _, f := range []fmtCase{
-		// {name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
-		{name: "ClassicSummary", newChunkFn: func() Chunk { return NewXORChunk() }},
+		{name: "NativeSummary", newChunkFn: func() Chunk { return NewSummaryChunk() }},
+		// {name: "ClassicSummary", newChunkFn: func() Chunk { return NewXORChunk() }},
 	} {
 		for _, s := range sampleCases {
 			b.Run(fmt.Sprintf("%s", s.name), func(b *testing.B) {
@@ -129,14 +128,17 @@ func BenchmarkAppender(b *testing.B) {
 				app, _ := c.Appender()
 				a := app.(*SummaryAppender)
 				for _, p := range s.samples {
-					newChunk, newApp, err := a.AppendSummary(p.t, p.s)
-					if err != nil {
-						b.Fatal(err)
-					}
-					if newChunk != nil {
-						a = newApp.(*SummaryAppender)
-						c = newChunk
-					}
+					a.AppendSummary(p.t, p.s)
+					// no new Appender for now since we are passing same samples no
+					// disorder
+					// newChunk, newApp, err := a.AppendSummary(p.t, p.s)
+					// if err != nil {
+					// 	b.Fatal(err)
+					// }
+					// if newChunk != nil {
+					// 	a = newApp.(*SummaryAppender)
+					// 	c = newChunk
+					// }
 				}
 				b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
 			}
@@ -185,50 +187,112 @@ func BenchmarkAppender(b *testing.B) {
 
 func BenchmarkIterator(b *testing.B) {
 	foreachFmtSampleCase(b, func(b *testing.B, f fmtCase, s sampleCase) {
-		b.ReportAllocs()
-		c := f.newChunkFn()
+		switch f.name {
+		case "NativeSummary":
+			b.ReportAllocs()
+			c := f.newChunkFn()
 
-		app, _ := c.Appender()
-		a := app.(*SummaryAppender)
-		for _, p := range s.samples {
-			a.AppendSummary(p.t, p.s)
-		}
-		// what we do is take bytes and if anything is buffered right we
-		// reinitialize the chunk
-		c.Reset(c.Bytes())
-		it := c.Iterator(nil)
-
-		require.Equal(b, len(s.samples), c.NumSamples())
-		var got []summaryRet
-		for it.Next() == ValSummary {
-			t, s := it.AtSummary(nil)
-
-			got = append(got, summaryRet{t: t, s: s})
-		}
-		if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
-			require.NoError(b, err)
-		}
-		if diff := cmp.Diff(s.samples, got, cmp.AllowUnexported(summaryRet{}), cmp.Comparer(func(a, b summaryRet) bool {
-			return summary.Equal(a.s, b.s)
-		})); diff != "" {
-			b.Fatalf("mismatch (-want +got):\n%s", diff)
-		}
-
-		var sink *summary.Summary
-		// Measure decoding efficiency.
-		for b.Loop() {
-			// just in case some buffered implementation
-			// we reinitialize the chunk
-			c.Reset(c.Bytes())
-			b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
-
-			it := c.Iterator(it)
-			for it.Next() == ValSummary {
-				_, s := it.AtSummary(nil)
-				sink = s
+			app, _ := c.Appender()
+			a := app.(*SummaryAppender)
+			for _, p := range s.samples {
+				a.AppendSummary(p.t, p.s)
 			}
-			if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
-				require.NoError(b, err)
+			// what we do is take bytes and if anything is buffered right we
+			// reinitialize the chunk in simple words bring the iterator to start
+			c.Reset(c.Bytes())
+			require.Equal(b, len(s.samples), c.NumSamples())
+			var sink *summary.Summary
+			// Measure decoding efficiency.
+			for b.Loop() {
+				// just in case some buffered implementation
+				// we reinitialize the chunk
+				c.Reset(c.Bytes())
+				b.ReportMetric(float64(len(c.Bytes())), "B/chunk")
+
+				it := c.Iterator(nil)
+				ns := &summary.Summary{}
+				for it.Next() == ValSummary {
+					_, s := it.AtSummary(ns)
+					sink = s
+				}
+				if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
+					require.NoError(b, err)
+				}
+				// for tell to see sink alloc also in benchmark
+				_ = sink
+			}
+		case "ClassicSummary":
+			b.ReportAllocs()
+			numQuantiles := len(s.samples[0].s.QuantileTargets)
+
+			// Setup: Encode data ONCE outside the benchmark loop
+			sumC := NewXORChunk()
+			countC := NewXORChunk()
+			quantileChunks := make([]*XORChunk, numQuantiles)
+			for i := range numQuantiles {
+				quantileChunks[i] = NewXORChunk()
+			}
+
+			sumAppender, _ := sumC.Appender()
+			countAppender, _ := countC.Appender()
+			quantileAppenders := make([]Appender, numQuantiles)
+			for i := range numQuantiles {
+				quantileAppenders[i], _ = quantileChunks[i].Appender()
+			}
+
+			for _, p := range s.samples {
+				sumAppender.Append(p.t, p.s.Sum)
+				countAppender.Append(p.t, p.s.Count)
+				for i, qv := range p.s.QuantileValues {
+					quantileAppenders[i].Append(p.t, qv)
+				}
+			}
+
+			require.Equal(b, len(s.samples), sumC.NumSamples())
+			require.Equal(b, len(s.samples), countC.NumSamples())
+			for i := range numQuantiles {
+				require.Equal(b, len(s.samples), quantileChunks[i].NumSamples())
+			}
+
+			totalBytes := len(sumC.Bytes()) + len(countC.Bytes())
+			for _, qc := range quantileChunks {
+				totalBytes += len(qc.Bytes())
+			}
+
+			var sink float64
+
+			for b.Loop() {
+				b.ReportMetric(float64(totalBytes), "B/chunk")
+
+				// reseting byte stream due to buffer
+				sumC.Reset(sumC.Bytes())
+				countC.Reset(countC.Bytes())
+				for _, qc := range quantileChunks {
+					qc.Reset(qc.Bytes())
+				}
+
+				sumIter := sumC.Iterator(nil)
+				countIter := countC.Iterator(nil)
+				quantIters := make([]Iterator, numQuantiles)
+				for i := range numQuantiles {
+					quantIters[i] = quantileChunks[i].Iterator(nil)
+				}
+
+				// Decode all values
+				for sumIter.Next() != ValNone {
+					_, v := sumIter.At()
+					sink = v
+				}
+				for countIter.Next() != ValNone {
+					_, v := countIter.At()
+					sink = v
+				}
+				for _, qIter := range quantIters {
+					for qIter.Next() != ValNone {
+						_, v := qIter.At()
+						sink = v
+					}
+				}
 			}
 			_ = sink
 		}

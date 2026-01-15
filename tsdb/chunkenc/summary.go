@@ -135,7 +135,7 @@ func (a *SummaryAppender) AppendSummary(t int64, s *summary.Summary) (c Chunk, a
 		newChunk := NewSummaryChunk()
 		app, err = newChunk.Appender()
 		if err != nil {
-			panic(err) // TODO: check why this can never happen
+			panic(err)
 		}
 		sapp := app.(*SummaryAppender)
 		sapp.appendSummary(t, s)
