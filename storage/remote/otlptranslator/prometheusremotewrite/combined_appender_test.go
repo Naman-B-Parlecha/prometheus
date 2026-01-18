@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -811,6 +812,10 @@ func (a *appenderRecorder) AppendHistogram(ref storage.SeriesRef, ls labels.Labe
 	}
 	a.setOutRef(ref)
 	return ref, nil
+}
+
+func (a *appenderRecorder) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on appenderRecorder")
 }
 
 func (a *appenderRecorder) AppendHistogramSTZeroSample(ref storage.SeriesRef, ls labels.Labels, _, _ int64, _ *histogram.Histogram, _ *histogram.FloatHistogram) (storage.SeriesRef, error) {

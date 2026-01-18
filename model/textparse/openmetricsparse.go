@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/schema"
 )
@@ -777,4 +778,8 @@ func normalizeFloatsInLabelValues(t model.MetricType, l, v string) string {
 		}
 	}
 	return v
+}
+
+func (*OpenMetricsParser) Summary() ([]byte, *int64, *summary.Summary) {
+	panic("not implemented: Summary() called on OpenMetricsParser")
 }

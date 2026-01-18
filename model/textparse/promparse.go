@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/schema"
 )
@@ -530,4 +531,8 @@ func parseFloat(s string) (float64, error) {
 		return 0, errors.New("unsupported character in float")
 	}
 	return strconv.ParseFloat(s, 64)
+}
+
+func (*PromParser) Summary() ([]byte, *int64, *summary.Summary) {
+	panic("not implemented: Summary() called on PromParser")
 }

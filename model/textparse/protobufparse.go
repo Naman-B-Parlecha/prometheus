@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"unicode/utf8"
 
@@ -27,9 +28,11 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	dto "github.com/prometheus/prometheus/prompb/io/prometheus/client"
 	"github.com/prometheus/prometheus/schema"
 	"github.com/prometheus/prometheus/util/convertnhcb"
+	"github.com/prometheus/prometheus/util/convertns"
 )
 
 // ProtobufParser parses the old Prometheus protobuf format and present it
@@ -75,19 +78,26 @@ type ProtobufParser struct {
 
 	// Whether to convert classic histograms to native histograms with custom buckets.
 	convertClassicHistogramsToNHCB bool
+	// Whether to convert classic summaries to native summaries.
+	convertClassicSummariesToNS bool
 	// Reusable classic to NHCB converter.
 	tmpNHCB convertnhcb.TempHistogram
+	// resuable classic to NS converter
+	tmpNS convertns.TempSummary
 	// We need to preload NHCB since we cannot do error handling in Histogram().
 	nhcbH  *histogram.Histogram
 	nhcbFH *histogram.FloatHistogram
+
+	ns *summary.Summary
 }
 
 // NewProtobufParser returns a parser for the payload in the byte slice.
 func NewProtobufParser(
 	b []byte,
-	ignoreNativeHistograms, parseClassicHistograms, convertClassicHistogramsToNHCB, enableTypeAndUnitLabels bool,
+	ignoreNativeHistograms, parseClassicHistograms, convertClassicHistogramsToNHCB, convertClassicSummariesToNS, enableTypeAndUnitLabels bool,
 	st *labels.SymbolTable,
 ) Parser {
+	slog.Debug("convert ns in proto parse new", slog.Any("value", convertClassicSummariesToNS))
 	builder := labels.NewScratchBuilderWithSymbolTable(st, 16)
 	builder.SetUnsafeAdd(true)
 	return &ProtobufParser{
@@ -100,6 +110,7 @@ func NewProtobufParser(
 		parseClassicHistograms:         parseClassicHistograms,
 		enableTypeAndUnitLabels:        enableTypeAndUnitLabels,
 		convertClassicHistogramsToNHCB: convertClassicHistogramsToNHCB,
+		convertClassicSummariesToNS:    convertClassicSummariesToNS,
 		tmpNHCB:                        convertnhcb.NewTempHistogram(),
 	}
 }
@@ -281,6 +292,28 @@ func (p *ProtobufParser) Histogram() ([]byte, *int64, *histogram.Histogram, *his
 	return p.entryBytes.Bytes(), nil, &sh, nil
 }
 
+func (p *ProtobufParser) Summary() ([]byte, *int64, *summary.Summary) {
+	var (
+		ts = &p.dec.TimestampMs // To save memory allocations, never nil.
+		s  = p.dec.GetSummary()
+	)
+
+	ns := summary.Summary{
+		Count:          float64(s.GetSampleCount()),
+		Sum:            s.GetSampleSum(),
+		QuantileValues: make([]float64, len(s.GetQuantile())),
+	}
+
+	for i, v := range s.GetQuantile() {
+		ns.QuantileTargets[i] = v.GetQuantile()
+		ns.QuantileValues[i] = v.GetValue()
+	}
+	if *ts != 0 {
+		return p.entryBytes.Bytes(), ts, &ns
+	}
+	return p.entryBytes.Bytes(), nil, &ns
+}
+
 // Help returns the metric name and help text in the current entry.
 // Must only be called after Next returned a help entry.
 // The returned byte slices become invalid after the next call to Next.
@@ -426,6 +459,8 @@ func (p *ProtobufParser) Next() (Entry, error) {
 	p.exemplarReturned = false
 	p.nhcbH = nil
 	p.nhcbFH = nil
+	p.ns = nil
+
 	switch p.state {
 	// Invalid state occurs on:
 	// * First Next() call.
@@ -499,7 +534,7 @@ func (p *ProtobufParser) Next() (Entry, error) {
 			t == dto.MetricType_HISTOGRAM ||
 			t == dto.MetricType_GAUGE_HISTOGRAM {
 			// Non-trivial series (complex metrics, with magic suffixes).
-
+			slog.Debug("inside next")
 			isClassicHistogram := (t == dto.MetricType_HISTOGRAM || t == dto.MetricType_GAUGE_HISTOGRAM) &&
 				(p.ignoreNativeHistograms || !isNativeHistogram(p.dec.GetHistogram()))
 			skipSeries := p.convertClassicHistogramsToNHCB && isClassicHistogram && !p.parseClassicHistograms
@@ -515,7 +550,7 @@ func (p *ProtobufParser) Next() (Entry, error) {
 				return p.state, nil
 			}
 
-			// Reset histogram fields.
+			// Reset histogram and summary fields.
 			p.fieldPos = -2
 			p.fieldsDone = false
 			p.exemplarPos = 0
@@ -539,6 +574,17 @@ func (p *ProtobufParser) Next() (Entry, error) {
 					// We have an NHCB to emit, no need to decode the next series.
 					decodeNext = false
 				}
+			}
+			if t == dto.MetricType_SUMMARY && p.convertClassicSummariesToNS {
+				var err error
+				p.ns, err = p.convertToNS(t)
+				slog.Debug("inside Next()", slog.Any("NS", *p.ns))
+				if err != nil {
+					return EntryInvalid, err
+				}
+				p.state = EntrySummary
+				// to not move to next series
+				decodeNext = false
 			}
 		}
 		// Is there another series?
@@ -585,6 +631,21 @@ func (p *ProtobufParser) Next() (Entry, error) {
 			return switchToClassic()
 		}
 
+		if err := p.onSeriesOrHistogramUpdate(); err != nil {
+			return EntryInvalid, err
+		}
+	case EntrySummary:
+		if err := p.dec.NextMetric(); err != nil {
+			if errors.Is(err, io.EOF) {
+				p.state = EntryInvalid
+				return p.Next()
+			}
+			return EntryInvalid, err
+		}
+		// reseting to go to next series in same family
+		p.fieldPos = -2
+		p.fieldsDone = false
+		p.state = EntrySeries
 		if err := p.onSeriesOrHistogramUpdate(); err != nil {
 			return EntryInvalid, err
 		}
@@ -649,7 +710,7 @@ func (p *ProtobufParser) onSeriesOrHistogramUpdate() error {
 // state.
 func (p *ProtobufParser) getMagicName() string {
 	t := p.dec.GetType()
-	if p.state == EntryHistogram || (t != dto.MetricType_HISTOGRAM && t != dto.MetricType_GAUGE_HISTOGRAM && t != dto.MetricType_SUMMARY) {
+	if p.state == EntryHistogram || p.state == EntrySummary || (t != dto.MetricType_HISTOGRAM && t != dto.MetricType_GAUGE_HISTOGRAM && t != dto.MetricType_SUMMARY) {
 		return p.dec.GetName()
 	}
 	if p.fieldPos == -2 {
@@ -668,7 +729,7 @@ func (p *ProtobufParser) getMagicName() string {
 // so, its name and value. It also sets p.fieldsDone if applicable.
 func (p *ProtobufParser) getMagicLabel() (bool, string, string) {
 	// Native histogram or _count and _sum series.
-	if p.state == EntryHistogram || p.fieldPos < 0 {
+	if p.state == EntryHistogram || p.state == EntrySummary || p.fieldPos < 0 {
 		return false, "", ""
 	}
 	switch p.dec.GetType() {
@@ -743,4 +804,27 @@ func (p *ProtobufParser) convertToNHCB(t dto.MetricType) (*histogram.Histogram, 
 		}
 	}
 	return ch, cfh, nil
+}
+
+func (p *ProtobufParser) convertToNS(t dto.MetricType) (*summary.Summary, error) {
+	s := p.dec.Summary
+	p.tmpNS.Reset()
+
+	v := float64(s.GetSampleCount())
+	if err := p.tmpNS.SetCount(v); err != nil {
+		return nil, err
+	}
+	if err := p.tmpNS.SetSum(s.GetSampleSum()); err != nil {
+		return nil, err
+	}
+	for _, q := range s.GetQuantile() {
+		if err := p.tmpNS.SetQuantile(q.Quantile, q.Value); err != nil {
+			return nil, err
+		}
+	}
+	ns, err := p.tmpNS.Convert()
+	if err != nil {
+		return nil, err
+	}
+	return ns, nil
 }

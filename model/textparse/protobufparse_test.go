@@ -843,7 +843,7 @@ func TestProtobufParse(t *testing.T) {
 	}{
 		{
 			name:   "ignoreNativeHistograms=false/parseClassicHistograms=false/enableTypeAndUnitLabels=false",
-			parser: NewProtobufParser(inputBuf.Bytes(), false, false, false, false, labels.NewSymbolTable()),
+			parser: NewProtobufParser(inputBuf.Bytes(), false, false, false, false, false, labels.NewSymbolTable()),
 			expected: []parsedEntry{
 				{
 					m:    "go_build_info",
@@ -1478,7 +1478,7 @@ func TestProtobufParse(t *testing.T) {
 		},
 		{
 			name:   "ignoreNativeHistograms=false/parseClassicHistograms=false/enableTypeAndUnitLabels=true",
-			parser: NewProtobufParser(inputBuf.Bytes(), false, false, false, true, labels.NewSymbolTable()),
+			parser: NewProtobufParser(inputBuf.Bytes(), false, false, false, false, true, labels.NewSymbolTable()),
 			expected: []parsedEntry{
 				{
 					m:    "go_build_info",
@@ -2150,7 +2150,7 @@ func TestProtobufParse(t *testing.T) {
 		},
 		{
 			name:   "ignoreNativeHistograms=false/parseClassicHistograms=true/enableTypeAndUnitLabels=false",
-			parser: NewProtobufParser(inputBuf.Bytes(), false, true, false, false, labels.NewSymbolTable()),
+			parser: NewProtobufParser(inputBuf.Bytes(), false, true, false, false, false, labels.NewSymbolTable()),
 			expected: []parsedEntry{
 				{
 					m:    "go_build_info",
@@ -3213,7 +3213,7 @@ func TestProtobufParse(t *testing.T) {
 		},
 		{
 			name:   "ignoreNativeHistograms=true/parseClassicHistograms=false/enableTypeAndUnitLabels=false",
-			parser: NewProtobufParser(inputBuf.Bytes(), true, false, false, false, labels.NewSymbolTable()),
+			parser: NewProtobufParser(inputBuf.Bytes(), true, false, false, false, false, labels.NewSymbolTable()),
 			expected: []parsedEntry{
 				{
 					m:    "go_build_info",
@@ -5743,7 +5743,7 @@ metric: <
 	for _, tc := range testCases {
 		name := fmt.Sprintf("ignoreNative=%v,keepClassic=%v,typeAndUnit=%v", tc.ignoreNative, tc.keepClassic, tc.typeAndUnit)
 		t.Run(name, func(t *testing.T) {
-			p := NewProtobufParser(data, tc.ignoreNative, tc.keepClassic, true, tc.typeAndUnit, labels.NewSymbolTable())
+			p := NewProtobufParser(data, tc.ignoreNative, tc.keepClassic, true, false, tc.typeAndUnit, labels.NewSymbolTable())
 			got := testParse(t, p)
 			requireEntries(t, tc.expected, got)
 		})
@@ -5788,7 +5788,7 @@ func FuzzProtobufParser_Labels(f *testing.F) {
 
 			// Use protobuf parser to parse like in real usage
 			b = buf.Bytes()
-			p := NewProtobufParser(b, false, parseClassicHistogram, false, enableTypeAndUnitLabels, st)
+			p := NewProtobufParser(b, false, parseClassicHistogram, false, false, enableTypeAndUnitLabels, st)
 
 			for {
 				entry, err := p.Next()

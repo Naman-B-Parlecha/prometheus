@@ -16,6 +16,7 @@ package textparse
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 
 	"github.com/prometheus/common/model"
@@ -23,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 // Parser parses samples from a byte slice of samples in different exposition formats.
@@ -42,6 +44,10 @@ type Parser interface {
 	// We already accepted in many places (PRW, proto parsing histograms) that 0 timestamp is not a
 	// a valid timestamp. If needed it can be represented as 0+1ms.
 	Histogram() ([]byte, *int64, *histogram.Histogram, *histogram.FloatHistogram)
+
+	// When native summaries is active Summary will help merge all series into
+	// complex summary type
+	Summary() ([]byte, *int64, *summary.Summary)
 
 	// Help returns the metric name and help text in the current entry.
 	// Must only be called after Next returned a help entry.
@@ -153,6 +159,10 @@ type ParserOptions struct {
 	// FallbackContentType specifies the fallback content type to use when the provided
 	// Content-Type header cannot be parsed or is not supported.
 	FallbackContentType string
+
+	// ConvertClassicSummariesToNS enables conversion of classic summaries
+	// to native summaries.
+	ConvertClassicSummariesToNS bool
 }
 
 // New returns a new parser of the byte slice.
@@ -164,6 +174,7 @@ type ParserOptions struct {
 // other error parsing the supplied Content-Type.
 // If the returned parser is nil then the scrape must fail.
 func New(b []byte, contentType string, st *labels.SymbolTable, opts ParserOptions) (Parser, error) {
+	slog.Debug("convert ns", slog.Any("value", opts.ConvertClassicSummariesToNS))
 	if st == nil {
 		st = labels.NewSymbolTable()
 	}
@@ -184,6 +195,7 @@ func New(b []byte, contentType string, st *labels.SymbolTable, opts ParserOption
 			opts.IgnoreNativeHistograms,
 			opts.KeepClassicOnClassicAndNativeHistograms,
 			opts.ConvertClassicHistogramsToNHCB,
+			opts.ConvertClassicSummariesToNS,
 			opts.EnableTypeAndUnitLabels,
 			st,
 		), err
@@ -211,4 +223,5 @@ const (
 	EntryComment   Entry = 3
 	EntryUnit      Entry = 4
 	EntryHistogram Entry = 5 // EntryHistogram marks a series with a native histogram as a value.
+	EntrySummary   Entry = 6 // Marks series as ns
 )

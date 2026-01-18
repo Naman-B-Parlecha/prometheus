@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -46,6 +47,9 @@ func (a *initAppender) SetOptions(opts *storage.AppendOptions) {
 	}
 }
 
+func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on initAppender")
+}
 func (a *initAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if a.app != nil {
 		return a.app.Append(ref, lset, t, v)
@@ -409,6 +413,9 @@ func (a *headAppender) SetOptions(opts *storage.AppendOptions) {
 	a.hints = opts
 }
 
+func (a *headAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on headAppender")
+}
 func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	// Fail fast if OOO is disabled and the sample is out of bounds.
 	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.

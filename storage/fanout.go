@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 type fanout struct {
@@ -218,6 +219,9 @@ func (f *fanoutAppender) AppendHistogram(ref SeriesRef, l labels.Labels, t int64
 		}
 	}
 	return ref, nil
+}
+func (f *fanoutAppender) AppendSummary(ref SeriesRef, l labels.Labels, t int64, s summary.Summary) (SeriesRef, error) {
+	panic("not implemented add it")
 }
 
 func (f *fanoutAppender) AppendHistogramSTZeroSample(ref SeriesRef, l labels.Labels, t, st int64, h *histogram.Histogram, fh *histogram.FloatHistogram) (SeriesRef, error) {

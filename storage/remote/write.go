@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/wlog"
 )
@@ -327,7 +328,9 @@ func (t *timestampTracker) AppendExemplar(storage.SeriesRef, labels.Labels, exem
 	t.exemplars++
 	return 0, nil
 }
-
+func (a *timestampTracker) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on timestampTracker")
+}
 func (t *timestampTracker) AppendHistogram(_ storage.SeriesRef, _ labels.Labels, ts int64, _ *histogram.Histogram, _ *histogram.FloatHistogram) (storage.SeriesRef, error) {
 	t.histograms++
 	if ts > t.highestTimestamp {

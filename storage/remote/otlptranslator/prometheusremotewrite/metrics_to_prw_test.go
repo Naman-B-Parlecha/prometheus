@@ -36,6 +36,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -1318,6 +1319,9 @@ func (*noOpAppender) AppendSTZeroSample(_ storage.SeriesRef, _ labels.Labels, _,
 func (a *noOpAppender) AppendHistogram(_ storage.SeriesRef, _ labels.Labels, _ int64, _ *histogram.Histogram, _ *histogram.FloatHistogram) (storage.SeriesRef, error) {
 	a.histograms++
 	return 1, nil
+}
+func (a *noOpAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on noOpAppender")
 }
 
 func (*noOpAppender) AppendHistogramSTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64, _ *histogram.Histogram, _ *histogram.FloatHistogram) (storage.SeriesRef, error) {

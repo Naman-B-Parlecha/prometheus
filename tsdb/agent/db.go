@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
@@ -1009,6 +1010,10 @@ func (a *appender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int
 
 	a.metrics.totalAppendedSamples.WithLabelValues(sampleMetricTypeHistogram).Inc()
 	return storage.SeriesRef(series.ref), nil
+}
+
+func (a *appender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on appender")
 }
 
 func (*appender) UpdateMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {

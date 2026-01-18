@@ -50,6 +50,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/relabel"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/model/value"
@@ -859,6 +860,7 @@ type scrapeLoop struct {
 	enableNativeHistogramScraping bool
 	alwaysScrapeClassicHist       bool
 	convertClassicHistToNHCB      bool
+	convertClassicSummaryToNS     bool
 	fallbackScrapeProtocol        string
 	enableCompression             bool
 	mrc                           []*relabel.Config
@@ -1211,6 +1213,7 @@ func newScrapeLoop(opts scrapeLoopOptions) *scrapeLoop {
 		enableNativeHistogramScraping: opts.sp.config.ScrapeNativeHistogramsEnabled(),
 		alwaysScrapeClassicHist:       opts.sp.config.AlwaysScrapeClassicHistogramsEnabled(),
 		convertClassicHistToNHCB:      opts.sp.config.ConvertClassicHistogramsToNHCBEnabled(),
+		convertClassicSummaryToNS:     opts.sp.config.ConvertClassicSummariesToNSEnabled(),
 		fallbackScrapeProtocol:        opts.sp.config.ScrapeFallbackProtocol.HeaderMediaType(),
 		enableCompression:             opts.sp.config.EnableCompression,
 		mrc:                           opts.sp.config.MetricRelabelConfigs,
@@ -1571,10 +1574,13 @@ func (sl *scrapeLoopAppender) append(b []byte, contentType string, ts time.Time)
 		return total, added, seriesAdded, err
 	}
 
+	slog.Debug("convert ns in append", slog.Any("value", sl.convertClassicSummaryToNS))
+
 	p, err := textparse.New(b, contentType, sl.symbolTable, textparse.ParserOptions{
 		EnableTypeAndUnitLabels:                 sl.enableTypeAndUnitLabels,
 		IgnoreNativeHistograms:                  !sl.enableNativeHistogramScraping,
 		ConvertClassicHistogramsToNHCB:          sl.convertClassicHistToNHCB,
+		ConvertClassicSummariesToNS:             sl.convertClassicSummaryToNS,
 		KeepClassicOnClassicAndNativeHistograms: sl.alwaysScrapeClassicHist,
 		OpenMetricsSkipSTSeries:                 sl.enableSTZeroIngestion,
 		FallbackContentType:                     sl.fallbackScrapeProtocol,
@@ -1622,13 +1628,14 @@ func (sl *scrapeLoopAppender) append(b []byte, contentType string, ts time.Time)
 loop:
 	for {
 		var (
-			et                       textparse.Entry
-			sampleAdded, isHistogram bool
-			met                      []byte
-			parsedTimestamp          *int64
-			val                      float64
-			h                        *histogram.Histogram
-			fh                       *histogram.FloatHistogram
+			et                                  textparse.Entry
+			sampleAdded, isHistogram, isSummary bool
+			met                                 []byte
+			parsedTimestamp                     *int64
+			val                                 float64
+			h                                   *histogram.Histogram
+			fh                                  *histogram.FloatHistogram
+			s                                   *summary.Summary
 		)
 		if et, err = p.Next(); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -1654,14 +1661,19 @@ loop:
 			continue
 		case textparse.EntryHistogram:
 			isHistogram = true
+		case textparse.EntrySummary:
+			isSummary = true
 		default:
 		}
 		total++
 
 		t := defTime
-		if isHistogram {
+		switch {
+		case isHistogram:
 			met, parsedTimestamp, h, fh = p.Histogram()
-		} else {
+		case isSummary:
+			met, parsedTimestamp, s = p.Summary()
+		default:
 			met, parsedTimestamp, val = p.Series()
 		}
 		if !sl.honorTimestamps {
@@ -1719,13 +1731,16 @@ loop:
 		} else {
 			if sl.enableSTZeroIngestion {
 				if stMs := p.StartTimestamp(); stMs != 0 {
-					if isHistogram {
+					switch {
+					case isHistogram:
 						if h != nil {
 							ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, h, nil)
 						} else {
 							ref, err = app.AppendHistogramSTZeroSample(ref, lset, t, stMs, nil, fh)
 						}
-					} else {
+					case isSummary:
+						// TODO(naman) to complete this for now lets focus on normla native summaries with st
+					default:
 						ref, err = app.AppendSTZeroSample(ref, lset, t, stMs)
 					}
 					if err != nil && !errors.Is(err, storage.ErrOutOfOrderST) { // OOO is a common case, ignoring completely for now.
@@ -1736,14 +1751,18 @@ loop:
 				}
 			}
 
-			if isHistogram {
+			switch {
+			case isHistogram:
 				if h != nil {
 					ref, err = app.AppendHistogram(ref, lset, t, h, nil)
 				} else {
 					ref, err = app.AppendHistogram(ref, lset, t, nil, fh)
 				}
-			} else {
+			case isSummary:
+				ref, err = app.AppendSummary(ref, lset, t, s)
+			default:
 				ref, err = app.Append(ref, lset, t, val)
+
 			}
 		}
 
