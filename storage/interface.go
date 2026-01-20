@@ -313,7 +313,7 @@ type Appender interface {
 
 	// this is experimental for playing around with native summaries we will migrate to appenderv2
 	// once it is stable and native summary proposal is accpeted
-	AppendSummary(ref SeriesRef, l labels.Labels, t int64, s summary.Summary) (SeriesRef, error)
+	AppendSummary(ref SeriesRef, l labels.Labels, t int64, s *summary.Summary) (SeriesRef, error)
 }
 
 // GetRef is an extra interface on Appenders used by downstream projects

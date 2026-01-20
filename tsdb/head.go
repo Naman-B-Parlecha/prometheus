@@ -36,6 +36,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -91,6 +92,7 @@ type Head struct {
 	exemplarsPool       zeropool.Pool[[]exemplarWithSeriesRef]
 	histogramsPool      zeropool.Pool[[]record.RefHistogramSample]
 	floatHistogramsPool zeropool.Pool[[]record.RefFloatHistogramSample]
+	summariesPool       zeropool.Pool[[]record.RefSummarySample]
 	metadataPool        zeropool.Pool[[]record.RefMetadata]
 	seriesPool          zeropool.Pool[[]*memSeries]
 	typeMapPool         zeropool.Pool[map[chunks.HeadSeriesRef]sampleType]
@@ -107,6 +109,7 @@ type Head struct {
 	wlReplayFloatHistogramsPool zeropool.Pool[[]record.RefFloatHistogramSample]
 	wlReplayMetadataPool        zeropool.Pool[[]record.RefMetadata]
 	wlReplayMmapMarkersPool     zeropool.Pool[[]record.RefMmapMarker]
+	wlReplaySummariesPool       zeropool.Pool[[]record.RefSummarySample]
 
 	// All series addressable by their ID or hash.
 	series *stripeSeries
@@ -408,6 +411,7 @@ type headMetrics struct {
 const (
 	sampleMetricTypeFloat     = "float"
 	sampleMetricTypeHistogram = "histogram"
+	sampleMetricTypeSummary   = "summary"
 )
 
 func newHeadMetrics(h *Head, r prometheus.Registerer) *headMetrics {
@@ -2187,6 +2191,7 @@ type memSeries struct {
 	// We keep the last histogram value here (in addition to appending it to the chunk) so we can check for duplicates.
 	lastHistogramValue      *histogram.Histogram
 	lastFloatHistogramValue *histogram.FloatHistogram
+	lastSummaryValue        *summary.Summary
 
 	// Current appender for the head chunk. Set when a new head chunk is cut.
 	// It is nil only if headChunks is nil. E.g. if there was an appender that created a new series, but rolled back the commit

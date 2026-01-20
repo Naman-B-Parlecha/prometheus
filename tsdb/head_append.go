@@ -47,7 +47,7 @@ func (a *initAppender) SetOptions(opts *storage.AppendOptions) {
 	}
 }
 
-func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
 	panic("not implemented: calling appendSummary on initAppender")
 }
 func (a *initAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
@@ -264,6 +264,18 @@ func (h *Head) putHistogramBuffer(b []record.RefHistogramSample) {
 	h.histogramsPool.Put(b[:0])
 }
 
+func (h *Head) getSummaryBuffer() []record.RefSummarySample {
+	b := h.summariesPool.Get()
+	if b == nil {
+		return make([]record.RefSummarySample, 0, 512)
+	}
+	return b
+}
+
+func (h *Head) putSummaryBuffer(b []record.RefSummarySample) {
+	h.summariesPool.Put(b[:0])
+}
+
 func (h *Head) getFloatHistogramBuffer() []record.RefFloatHistogramSample {
 	b := h.floatHistogramsPool.Get()
 	if b == nil {
@@ -345,6 +357,7 @@ const (
 	stCustomBucketHistogram                        // Native integer histograms with custom bucket boundaries. Goes to `histograms`.
 	stFloatHistogram                               // Native float histograms. Goes to `floatHistograms`.
 	stCustomBucketFloatHistogram                   // Native float histograms with custom bucket boundaries. Goes to `floatHistograms`.
+	stSummary
 )
 
 // appendBatch is used to partition all the appended data into batches that are
@@ -361,9 +374,11 @@ type appendBatch struct {
 	histogramSeries      []*memSeries                     // HistogramSamples series corresponding to the samples held by this appender (using corresponding slice indices - same series may appear more than once).
 	floatHistograms      []record.RefFloatHistogramSample // New float histogram samples held by this appender.
 	floatHistogramSeries []*memSeries                     // FloatHistogramSamples series corresponding to the samples held by this appender (using corresponding slice indices - same series may appear more than once).
-	metadata             []record.RefMetadata             // New metadata held by this appender.
-	metadataSeries       []*memSeries                     // Series corresponding to the metadata held by this appender.
-	exemplars            []exemplarWithSeriesRef          // New exemplars held by this appender.
+	summaries            []record.RefSummarySample        // New summary samples held by this appender.
+	summarySeries        []*memSeries
+	metadata             []record.RefMetadata    // New metadata held by this appender.
+	metadataSeries       []*memSeries            // Series corresponding to the metadata held by this appender.
+	exemplars            []exemplarWithSeriesRef // New exemplars held by this appender.
 }
 
 // close returns all the slices to the pools in Head and nil's them.
@@ -386,6 +401,8 @@ func (b *appendBatch) close(h *Head) {
 	b.metadataSeries = nil
 	h.putExemplarBuffer(b.exemplars)
 	b.exemplars = nil
+	b.summarySeries = nil
+	h.putSummaryBuffer(b.summaries)
 }
 
 type headAppenderBase struct {
@@ -413,9 +430,107 @@ func (a *headAppender) SetOptions(opts *storage.AppendOptions) {
 	a.hints = opts
 }
 
-func (a *headAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
-	panic("not implemented: calling appendSummary on headAppender")
+func (a *headAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	slog.Debug("inside AppendSummary of headAppender")
+	// first we will check for ooo or io for just erroring
+	// out faster
+
+	if a.oooTimeWindow == 0 && t < a.minValidTime {
+		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		return 0, storage.ErrOutOfBounds
+	}
+	if s != nil {
+		if err := s.Validate(); err != nil {
+			return 0, err
+		}
+	}
+	ms := a.head.series.getByID(chunks.HeadSeriesRef(ref))
+	if ms == nil {
+		var err error
+		ms, _, err = a.getOrCreate(l)
+		if err != nil {
+			return 0, err
+		}
+	}
+	ms.Lock()
+	_, delta, err := ms.appendableSummary(t, s, a.headMaxt, a.minValidTime, a.oooTimeWindow)
+	if err == nil {
+		ms.pendingCommit = true
+	}
+	ms.Unlock()
+	if delta > 0 {
+		a.head.metrics.oooHistogram.Observe(float64(delta) / 1000)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrOutOfOrderSample):
+			a.head.metrics.outOfOrderSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		case errors.Is(err, storage.ErrTooOldSample):
+			a.head.metrics.tooOldSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		}
+		return 0, err
+	}
+	// sample type of memSeries
+	st := stSummary
+
+	b := a.getCurrentBatch(st, ms.ref)
+	b.summaries = append(b.summaries, record.RefSummarySample{
+		Ref: ms.ref,
+		T:   t,
+		S:   s,
+	})
+	b.summarySeries = append(b.summarySeries, ms)
+
+	if t < a.mint {
+		a.mint = t
+	}
+	if t > a.maxt {
+		a.maxt = t
+	}
+
+	slog.Debug("ns summary seriesRef", slog.Any("ms.ref", ms.ref))
+	return storage.SeriesRef(ms.ref), nil
 }
+
+func (s *memSeries) appendableSummary(t int64, ns *summary.Summary, headMaxt, minValidTime, oooTimeWindow int64) (isOOO bool, oooDelta int64, err error) {
+	// Check if we can append in the in-order chunk.
+	if t >= minValidTime {
+		if s.headChunks == nil {
+			// The series has no sample and was freshly created.
+			return false, 0, nil
+		}
+		msMaxt := s.maxTime()
+		if t > msMaxt {
+			return false, 0, nil
+		}
+		if t == msMaxt {
+			// We are allowing exact duplicates as we can encounter them in valid cases
+			// like federation and erroring out at that time would be extremely noisy.
+			// This only checks against the latest in-order sample.
+			// The OOO headchunk has its own method to detect these duplicates.
+			if !ns.Equals(s.lastSummaryValue) {
+				return false, 0, storage.ErrDuplicateSampleForTimestamp
+			}
+			// Sample is identical (ts + value) with most current (highest ts) sample in sampleBuf.
+			return false, 0, nil
+		}
+	}
+
+	// The sample cannot go in the in-order chunk. Check if it can go in the out-of-order chunk.
+	if oooTimeWindow > 0 && t >= headMaxt-oooTimeWindow {
+		return true, headMaxt - t, nil
+	}
+
+	// The sample cannot go in both in-order and out-of-order chunk.
+	if oooTimeWindow > 0 {
+		return true, headMaxt - t, storage.ErrTooOldSample
+	}
+	if t < minValidTime {
+		return false, headMaxt - t, storage.ErrOutOfBounds
+	}
+	return false, headMaxt - t, storage.ErrOutOfOrderSample
+}
+
 func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	// Fail fast if OOO is disabled and the sample is out of bounds.
 	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.
@@ -575,6 +690,8 @@ func (a *headAppenderBase) getCurrentBatch(st sampleType, s chunks.HeadSeriesRef
 			floatHistogramSeries: h.getSeriesBuffer(),
 			metadata:             h.getMetadataBuffer(),
 			metadataSeries:       h.getSeriesBuffer(),
+			summaries:            h.getSummaryBuffer(),
+			summarySeries:        h.getSeriesBuffer(),
 		}
 
 		// Allocate the exemplars buffer only if exemplars are enabled.
@@ -583,8 +700,8 @@ func (a *headAppenderBase) getCurrentBatch(st sampleType, s chunks.HeadSeriesRef
 		}
 		clear(a.typesInBatch)
 		switch st {
-		case stHistogram, stFloatHistogram, stCustomBucketHistogram, stCustomBucketFloatHistogram:
-			// We only record histogram sample types in the map.
+		case stHistogram, stFloatHistogram, stCustomBucketHistogram, stCustomBucketFloatHistogram, stSummary:
+			// We only record histogram and summary sample types in the map.
 			// Floats are implicit.
 			a.typesInBatch[s] = st
 		}

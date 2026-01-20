@@ -1320,7 +1320,7 @@ func (a *noOpAppender) AppendHistogram(_ storage.SeriesRef, _ labels.Labels, _ i
 	a.histograms++
 	return 1, nil
 }
-func (a *noOpAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+func (a *noOpAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
 	panic("not implemented: calling appendSummary on noOpAppender")
 }
 

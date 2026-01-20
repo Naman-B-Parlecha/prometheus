@@ -1316,6 +1316,8 @@ func (sl *scrapeLoop) appender() scrapeLoopAppendAdapter {
 // This function uses sl.appenderCtx instead of sl.ctx on purpose. A scrape should
 // only be cancelled on shutdown, not on reloads.
 func (sl *scrapeLoop) scrapeAndReport(last, appendTime time.Time, errc chan<- error) time.Time {
+
+	slog.Debug("fucking here")
 	start := time.Now()
 
 	// Only record after the first scrape.

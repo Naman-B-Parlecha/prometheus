@@ -814,7 +814,7 @@ func (a *appenderRecorder) AppendHistogram(ref storage.SeriesRef, ls labels.Labe
 	return ref, nil
 }
 
-func (a *appenderRecorder) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+func (a *appenderRecorder) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
 	panic("not implemented: calling appendSummary on appenderRecorder")
 }
 

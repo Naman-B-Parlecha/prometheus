@@ -1399,7 +1399,7 @@ func (m *mockAppendable) AppendExemplar(ref storage.SeriesRef, l labels.Labels, 
 	return ref, nil
 }
 
-func (a *mockAppendable) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+func (a *mockAppendable) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
 	panic("not implemented: calling appendSummary on mockAppendable")
 }
 

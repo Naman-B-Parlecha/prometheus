@@ -303,7 +303,7 @@ func (a *Appendable) Appender(ctx context.Context) storage.Appender {
 
 func (*appender) SetOptions(*storage.AppendOptions) {}
 
-func (a *appender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s summary.Summary) (storage.SeriesRef, error) {
+func (a *appender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
 	panic("not implemented: calling appendSummary on appender")
 }
 

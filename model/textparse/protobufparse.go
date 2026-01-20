@@ -299,9 +299,10 @@ func (p *ProtobufParser) Summary() ([]byte, *int64, *summary.Summary) {
 	)
 
 	ns := summary.Summary{
-		Count:          float64(s.GetSampleCount()),
-		Sum:            s.GetSampleSum(),
-		QuantileValues: make([]float64, len(s.GetQuantile())),
+		Count:           float64(s.GetSampleCount()),
+		Sum:             s.GetSampleSum(),
+		QuantileValues:  make([]float64, len(s.GetQuantile())),
+		QuantileTargets: make([]float64, len(s.GetQuantile())),
 	}
 
 	for i, v := range s.GetQuantile() {
