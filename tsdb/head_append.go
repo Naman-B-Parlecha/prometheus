@@ -48,8 +48,15 @@ func (a *initAppender) SetOptions(opts *storage.AppendOptions) {
 }
 
 func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
-	panic("not implemented: calling appendSummary on initAppender")
+	if a.app != nil {
+		return a.app.AppendSummary(ref, l, t, s)
+	}
+	a.head.initTime(t)
+	a.app = a.head.appender()
+
+	return a.app.AppendSummary(ref, l, t, s)
 }
+
 func (a *initAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if a.app != nil {
 		return a.app.Append(ref, lset, t, v)
@@ -436,6 +443,10 @@ func (a *headAppender) SetOptions(opts *storage.AppendOptions) {
 	a.hints = opts
 }
 
+// simple we will find if there is a memSeries for the set of labels already?
+// If not create a new one(basically a number which is increentatl) and then we
+// if appendable push to a batch of memSeries of head for batch commit
+// batch has wal records and memSeries
 func (a *headAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
 	slog.Debug("inside AppendSummary of headAppender")
 	// first we will check for ooo or io for just erroring
@@ -540,6 +551,7 @@ func (s *memSeries) appendableSummary(t int64, ns *summary.Summary, headMaxt, mi
 func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	// Fail fast if OOO is disabled and the sample is out of bounds.
 	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.
+	slog.Debug("HERE INSIDE Append of headAppender")
 	if a.oooTimeWindow == 0 && t < a.minValidTime {
 		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeFloat).Inc()
 		return 0, storage.ErrOutOfBounds
@@ -1260,6 +1272,15 @@ func (a *headAppenderBase) log() error {
 				}
 			}
 		}
+		if len(b.summaries) > 0 {
+			slog.Debug("inside log and b.summaries", slog.Any("len", len(b.summaries)))
+			rec = enc.SummarySamples(b.summaries, buf)
+			buf = rec[:0]
+
+			if err := a.head.wal.Log(rec); err != nil {
+				return fmt.Errorf("log samples: %w", err)
+			}
+		}
 		// Exemplars should be logged after samples (float/native histogram/etc),
 		// otherwise it might happen that we send the exemplars in a remote write
 		// batch before the samples, which in turn means the exemplar is rejected
@@ -1292,6 +1313,7 @@ func exemplarsForEncoding(es []exemplarWithSeriesRef) []record.RefExemplar {
 type appenderCommitContext struct {
 	floatsAppended     int
 	histogramsAppended int
+	summariesAppended  int
 	// Number of samples out of order but accepted: with ooo enabled and within time window.
 	oooFloatsAccepted    int
 	oooHistogramAccepted int
@@ -1885,6 +1907,7 @@ func (a *headAppenderBase) Commit() (err error) {
 	for _, b := range a.batches {
 		acc.floatsAppended += len(b.floats)
 		acc.histogramsAppended += len(b.histograms) + len(b.floatHistograms)
+		acc.summariesAppended += len(b.summaries)
 		a.commitExemplars(b)
 		defer b.close(h)
 	}
