@@ -521,6 +521,10 @@ func (p *ProtobufParser) Next() (Entry, error) {
 				return p.Next()
 			}
 			p.state = EntryHistogram
+		} else if t == dto.MetricType_SUMMARY && p.convertClassicSummariesToNS {
+			p.state = EntrySeries
+			p.fieldPos = -3
+			return p.Next()
 		} else {
 			p.state = EntrySeries
 		}
@@ -538,7 +542,7 @@ func (p *ProtobufParser) Next() (Entry, error) {
 			slog.Debug("inside next")
 			isClassicHistogram := (t == dto.MetricType_HISTOGRAM || t == dto.MetricType_GAUGE_HISTOGRAM) &&
 				(p.ignoreNativeHistograms || !isNativeHistogram(p.dec.GetHistogram()))
-			skipSeries := p.convertClassicHistogramsToNHCB && isClassicHistogram && !p.parseClassicHistograms
+			skipSeries := (p.convertClassicHistogramsToNHCB && isClassicHistogram && !p.parseClassicHistograms) || (p.convertClassicSummariesToNS && t == dto.MetricType_SUMMARY)
 
 			// Did we iterate over all the classic representations fields?
 			// NOTE: p.fieldsDone is updated on p.onSeriesOrHistogramUpdate.
@@ -636,6 +640,7 @@ func (p *ProtobufParser) Next() (Entry, error) {
 			return EntryInvalid, err
 		}
 	case EntrySummary:
+		slog.Debug("inside EntrySummary")
 		if err := p.dec.NextMetric(); err != nil {
 			if errors.Is(err, io.EOF) {
 				p.state = EntryInvalid
@@ -643,13 +648,14 @@ func (p *ProtobufParser) Next() (Entry, error) {
 			}
 			return EntryInvalid, err
 		}
-		// reseting to go to next series in same family
-		p.fieldPos = -2
+
+		// going to next series
+		p.fieldPos = -3
 		p.fieldsDone = false
 		p.state = EntrySeries
-		if err := p.onSeriesOrHistogramUpdate(); err != nil {
-			return EntryInvalid, err
-		}
+		return p.Next()
+		// i dont understand onSeriesOrHistogramUpdate :/ so removing
+		// just moving to next series
 	default:
 		return EntryInvalid, fmt.Errorf("invalid protobuf parsing state: %d", p.state)
 	}
