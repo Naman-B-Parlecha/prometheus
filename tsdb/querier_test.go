@@ -33,6 +33,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
@@ -788,6 +789,9 @@ func (it *mockSampleIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64
 
 func (it *mockSampleIterator) AtT() int64 {
 	return it.s[it.idx].T()
+}
+func (*mockSampleIterator) AtSummary(s *summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on mockSampleIterator is not supported")
 }
 
 func (it *mockSampleIterator) AtST() int64 {

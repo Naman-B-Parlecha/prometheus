@@ -26,6 +26,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
@@ -1702,6 +1703,10 @@ func (errIterator) Seek(int64) chunkenc.ValueType {
 
 func (errIterator) At() (int64, float64) {
 	return 0, 0
+}
+
+func (errIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on errIterator is not supported")
 }
 
 func (errIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {

@@ -373,6 +373,7 @@ func (h *Head) resetWLReplayResources() {
 	h.wlReplayFloatHistogramsPool = zeropool.Pool[[]record.RefFloatHistogramSample]{}
 	h.wlReplayMetadataPool = zeropool.Pool[[]record.RefMetadata]{}
 	h.wlReplayMmapMarkersPool = zeropool.Pool[[]record.RefMmapMarker]{}
+	h.wlReplaySummariesPool = zeropool.Pool[[]record.RefSummarySample]{}
 }
 
 type headMetrics struct {
@@ -2184,6 +2185,7 @@ type memSeries struct {
 	nextAt                           int64 // Timestamp at which to cut the next chunk.
 	histogramChunkHasComputedEndTime bool  // True if nextAt has been predicted for the current histograms chunk; false otherwise.
 	pendingCommit                    bool  // Whether there are samples waiting to be committed to this series.
+	summaryChunkHasComputedEndTime   bool  // True if nextAt has been predicted for the current summary chunk; false otherwise.
 
 	// We keep the last value here (in addition to appending it to the chunk) so we can check for duplicates.
 	lastValue float64

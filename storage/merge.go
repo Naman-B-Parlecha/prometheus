@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -598,7 +599,9 @@ func (c *chainSampleIterator) AtT() int64 {
 	}
 	return c.curr.AtT()
 }
-
+func (*chainSampleIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on chainSampleIterator is not supported")
+}
 func (c *chainSampleIterator) AtST() int64 {
 	if c.curr == nil {
 		panic("chainSampleIterator.AtST called before first .Next or after .Next returned false.")

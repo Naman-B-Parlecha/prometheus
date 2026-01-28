@@ -20,6 +20,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 )
@@ -137,7 +138,9 @@ func (it *listSeriesIterator) AtT() int64 {
 	s := it.samples.Get(it.idx)
 	return s.T()
 }
-
+func (listSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on listSeriesIterator is not supported")
+}
 func (it *listSeriesIterator) AtST() int64 {
 	s := it.samples.Get(it.idx)
 	return s.ST()
