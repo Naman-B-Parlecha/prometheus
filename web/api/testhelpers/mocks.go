@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/scrape"
@@ -276,6 +277,10 @@ func (*FakeSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *
 	panic("not implemented")
 }
 
+func (*FakeSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("not implemented")
+}
+
 func (f *FakeSeriesIterator) AtT() int64 {
 	return f.samples[f.idx].T
 }
@@ -337,6 +342,10 @@ func (*FakeHistogramSeriesIterator) AtHistogram(*histogram.Histogram) (int64, *h
 func (f *FakeHistogramSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	h := f.histograms[f.idx]
 	return h.T, h.H
+}
+
+func (*FakeHistogramSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("FakeSeriesIterator: AtSummary not implemented")
 }
 
 func (f *FakeHistogramSeriesIterator) AtT() int64 {

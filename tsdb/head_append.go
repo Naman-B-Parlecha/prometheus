@@ -495,13 +495,6 @@ func (a *headAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t i
 	})
 	b.summarySeries = append(b.summarySeries, ms)
 
-	if t < a.mint {
-		a.mint = t
-	}
-	if t > a.maxt {
-		a.maxt = t
-	}
-
 	slog.Debug("ns summary seriesRef", slog.Any("ms.ref", ms.ref))
 	return storage.SeriesRef(ms.ref), nil
 }
@@ -1249,12 +1242,11 @@ func (a *headAppenderBase) log() error {
 			}
 		}
 		if len(b.summaries) > 0 {
-			slog.Debug("inside log and b.summaries", slog.Any("len", len(b.summaries)))
 			rec = enc.SummarySamples(b.summaries, buf)
 			buf = rec[:0]
 
 			if err := a.head.wal.Log(rec); err != nil {
-				return fmt.Errorf("log samples: %w", err)
+				return fmt.Errorf("log summaries: %w", err)
 			}
 		}
 		// Exemplars should be logged after samples (float/native histogram/etc),
@@ -1838,7 +1830,6 @@ func (a *headAppenderBase) commitSummaries(b *appendBatch, acc *appenderCommitCo
 	var ok, chunkCreated bool
 	var series *memSeries
 
-	slog.Debug("commiting summaries lets goo")
 	for i, s := range b.summaries {
 		series = b.summarySeries[i]
 		series.Lock()
@@ -1886,7 +1877,6 @@ func (a *headAppenderBase) commitSummaries(b *appendBatch, acc *appenderCommitCo
 
 		series.cleanupAppendIDsBelow(a.cleanupAppendIDsBelow)
 		series.pendingCommit = false
-		slog.Debug("summary appeened idkkkkkk")
 		series.Unlock()
 	}
 }
