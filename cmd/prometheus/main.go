@@ -890,7 +890,7 @@ func main() {
 		&cfg.scrape,
 		logger.With("component", "scrape manager"),
 		logging.NewJSONFileLogger,
-		nil, fanoutStorage,
+		fanoutStorage, nil,
 		prometheus.DefaultRegisterer,
 	)
 	if err != nil {
