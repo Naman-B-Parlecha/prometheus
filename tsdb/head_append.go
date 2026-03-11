@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -45,6 +46,16 @@ func (a *initAppender) SetOptions(opts *storage.AppendOptions) {
 	if a.app != nil {
 		a.app.SetOptions(opts)
 	}
+}
+
+func (a *initAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	if a.app != nil {
+		return a.app.AppendSummary(ref, l, t, s)
+	}
+	a.head.initTime(t)
+	a.app = a.head.appender()
+
+	return a.app.AppendSummary(ref, l, t, s)
 }
 
 func (a *initAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
@@ -272,6 +283,18 @@ func (h *Head) putHistogramBuffer(b []record.RefHistogramSample) {
 	h.histogramsPool.Put(b[:0])
 }
 
+func (h *Head) getSummaryBuffer() []record.RefSummarySample {
+	b := h.summariesPool.Get()
+	if b == nil {
+		return make([]record.RefSummarySample, 0, 512)
+	}
+	return b
+}
+
+func (h *Head) putSummaryBuffer(b []record.RefSummarySample) {
+	h.summariesPool.Put(b[:0])
+}
+
 func (h *Head) getFloatHistogramBuffer() []record.RefFloatHistogramSample {
 	b := h.floatHistogramsPool.Get()
 	if b == nil {
@@ -355,6 +378,7 @@ const (
 	stCustomBucketHistogram                        // Native integer histograms with custom bucket boundaries. Goes to `histograms`.
 	stFloatHistogram                               // Native float histograms. Goes to `floatHistograms`.
 	stCustomBucketFloatHistogram                   // Native float histograms with custom bucket boundaries. Goes to `floatHistograms`.
+	stSummary
 )
 
 // appendBatch is used to partition all the appended data into batches that are
@@ -371,9 +395,11 @@ type appendBatch struct {
 	histogramSeries      []*memSeries                     // HistogramSamples series corresponding to the samples held by this appender (using corresponding slice indices - same series may appear more than once).
 	floatHistograms      []record.RefFloatHistogramSample // New float histogram samples held by this appender.
 	floatHistogramSeries []*memSeries                     // FloatHistogramSamples series corresponding to the samples held by this appender (using corresponding slice indices - same series may appear more than once).
-	metadata             []record.RefMetadata             // New metadata held by this appender.
-	metadataSeries       []*memSeries                     // Series corresponding to the metadata held by this appender.
-	exemplars            []exemplarWithSeriesRef          // New exemplars held by this appender.
+	summaries            []record.RefSummarySample        // New summary samples held by this appender.
+	summarySeries        []*memSeries
+	metadata             []record.RefMetadata    // New metadata held by this appender.
+	metadataSeries       []*memSeries            // Series corresponding to the metadata held by this appender.
+	exemplars            []exemplarWithSeriesRef // New exemplars held by this appender.
 }
 
 // close returns all the slices to the pools in Head and nil's them.
@@ -396,6 +422,8 @@ func (b *appendBatch) close(h *Head) {
 	b.metadataSeries = nil
 	h.putExemplarBuffer(b.exemplars)
 	b.exemplars = nil
+	b.summarySeries = nil
+	h.putSummaryBuffer(b.summaries)
 }
 
 type headAppenderBase struct {
@@ -422,9 +450,108 @@ func (a *headAppender) SetOptions(opts *storage.AppendOptions) {
 	a.hints = opts
 }
 
+// simple we will find if there is a memSeries for the set of labels already?
+// If not create a new one(basically a number which is increentatl) and then we
+// if appendable push to a batch of memSeries of head for batch commit
+// batch has wal records and memSeries
+func (a *headAppender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	slog.Debug("inside AppendSummary of headAppender")
+	// first we will check for ooo or io for just erroring
+	// out faster
+
+	if a.oooTimeWindow == 0 && t < a.minValidTime {
+		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		return 0, storage.ErrOutOfBounds
+	}
+	if s != nil {
+		if err := s.Validate(); err != nil {
+			return 0, err
+		}
+	}
+	ms := a.head.series.getByID(chunks.HeadSeriesRef(ref))
+	if ms == nil {
+		var err error
+		ms, _, err = a.getOrCreate(l)
+		if err != nil {
+			return 0, err
+		}
+	}
+	ms.Lock()
+	_, delta, err := ms.appendableSummary(t, s, a.headMaxt, a.minValidTime, a.oooTimeWindow)
+	if err == nil {
+		ms.pendingCommit = true
+	}
+	ms.Unlock()
+	if delta > 0 {
+		a.head.metrics.oooHistogram.Observe(float64(delta) / 1000)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrOutOfOrderSample):
+			a.head.metrics.outOfOrderSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		case errors.Is(err, storage.ErrTooOldSample):
+			a.head.metrics.tooOldSamples.WithLabelValues(sampleMetricTypeSummary).Inc()
+		}
+		return 0, err
+	}
+	// sample type of memSeries
+	st := stSummary
+
+	b := a.getCurrentBatch(st, ms.ref)
+	b.summaries = append(b.summaries, record.RefSummarySample{
+		Ref: ms.ref,
+		T:   t,
+		S:   s,
+	})
+	b.summarySeries = append(b.summarySeries, ms)
+
+	slog.Debug("ns summary seriesRef", slog.Any("ms.ref", ms.ref))
+	return storage.SeriesRef(ms.ref), nil
+}
+
+func (s *memSeries) appendableSummary(t int64, ns *summary.Summary, headMaxt, minValidTime, oooTimeWindow int64) (isOOO bool, oooDelta int64, err error) {
+	// Check if we can append in the in-order chunk.
+	if t >= minValidTime {
+		if s.headChunks == nil {
+			// The series has no sample and was freshly created.
+			return false, 0, nil
+		}
+		msMaxt := s.maxTime()
+		if t > msMaxt {
+			return false, 0, nil
+		}
+		if t == msMaxt {
+			// We are allowing exact duplicates as we can encounter them in valid cases
+			// like federation and erroring out at that time would be extremely noisy.
+			// This only checks against the latest in-order sample.
+			// The OOO headchunk has its own method to detect these duplicates.
+			if !ns.Equals(s.lastSummaryValue) {
+				return false, 0, storage.ErrDuplicateSampleForTimestamp
+			}
+			// Sample is identical (ts + value) with most current (highest ts) sample in sampleBuf.
+			return false, 0, nil
+		}
+	}
+
+	// The sample cannot go in the in-order chunk. Check if it can go in the out-of-order chunk.
+	if oooTimeWindow > 0 && t >= headMaxt-oooTimeWindow {
+		return true, headMaxt - t, nil
+	}
+
+	// The sample cannot go in both in-order and out-of-order chunk.
+	if oooTimeWindow > 0 {
+		return true, headMaxt - t, storage.ErrTooOldSample
+	}
+	if t < minValidTime {
+		return false, headMaxt - t, storage.ErrOutOfBounds
+	}
+	return false, headMaxt - t, storage.ErrOutOfOrderSample
+}
+
 func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	// Fail fast if OOO is disabled and the sample is out of bounds.
 	// Otherwise a full check will be done later to decide if the sample is in-order or out-of-order.
+	slog.Debug("HERE INSIDE Append of headAppender")
 	if a.oooTimeWindow == 0 && t < a.minValidTime {
 		a.head.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeFloat).Inc()
 		return 0, storage.ErrOutOfBounds
@@ -571,6 +698,8 @@ func (a *headAppenderBase) getCurrentBatch(st sampleType, s chunks.HeadSeriesRef
 			floatHistogramSeries: h.getSeriesBuffer(),
 			metadata:             h.getMetadataBuffer(),
 			metadataSeries:       h.getSeriesBuffer(),
+			summaries:            h.getSummaryBuffer(),
+			summarySeries:        h.getSeriesBuffer(),
 		}
 
 		// Allocate the exemplars buffer only if exemplars are enabled.
@@ -579,8 +708,8 @@ func (a *headAppenderBase) getCurrentBatch(st sampleType, s chunks.HeadSeriesRef
 		}
 		clear(a.typesInBatch)
 		switch st {
-		case stHistogram, stFloatHistogram, stCustomBucketHistogram, stCustomBucketFloatHistogram:
-			// We only record histogram sample types in the map.
+		case stHistogram, stFloatHistogram, stCustomBucketHistogram, stCustomBucketFloatHistogram, stSummary:
+			// We only record histogram and summary sample types in the map.
 			// Floats are implicit.
 			a.typesInBatch[s] = st
 		}
@@ -1122,6 +1251,14 @@ func (a *headAppenderBase) log() error {
 				}
 			}
 		}
+		if len(b.summaries) > 0 {
+			rec = enc.SummarySamples(b.summaries, buf)
+			buf = rec[:0]
+
+			if err := a.head.wal.Log(rec); err != nil {
+				return fmt.Errorf("log summaries: %w", err)
+			}
+		}
 		// Exemplars should be logged after samples (float/native histogram/etc),
 		// otherwise it might happen that we send the exemplars in a remote write
 		// batch before the samples, which in turn means the exemplar is rejected
@@ -1154,18 +1291,23 @@ func exemplarsForEncoding(es []exemplarWithSeriesRef) []record.RefExemplar {
 type appenderCommitContext struct {
 	floatsAppended     int
 	histogramsAppended int
+	summariesAppended  int
 	// Number of samples out of order but accepted: with ooo enabled and within time window.
 	oooFloatsAccepted    int
 	oooHistogramAccepted int
+	oooSummariesAccepted int
 	// Number of samples rejected due to: out of order but OOO support disabled.
-	floatOOORejected int
-	histoOOORejected int
+	floatOOORejected   int
+	histoOOORejected   int
+	summaryOOORejected int
 	// Number of samples rejected due to: out of order but too old (OOO support enabled, but outside time window).
-	floatTooOldRejected int
-	histoTooOldRejected int
+	floatTooOldRejected   int
+	histoTooOldRejected   int
+	summaryTooOldRejected int
 	// Number of samples rejected due to: out of bounds: with t < minValidTime (OOO support disabled).
 	floatOOBRejected    int
 	histoOOBRejected    int
+	summaryOOBRejected  int
 	inOrderMint         int64
 	inOrderMaxt         int64
 	oooMinT             int64
@@ -1371,6 +1513,20 @@ func (a *headAppenderBase) commitFloats(b *appendBatch, acc *appenderCommitConte
 				// This sample was counted as a float but is now a float histogram.
 				acc.floatsAppended--
 				acc.histogramsAppended++
+				series.Unlock()
+				continue
+			case series.lastSummaryValue != nil:
+				b.summaries = append(b.summaries, record.RefSummarySample{
+					Ref: series.ref,
+					T:   s.T,
+					S: &summary.Summary{
+						Sum: s.V,
+					},
+				})
+				b.summarySeries = append(b.summarySeries, series)
+				// This sample was counted as a float but is now a summary.
+				acc.floatsAppended--
+				acc.summariesAppended++
 				series.Unlock()
 				continue
 			}
@@ -1680,6 +1836,169 @@ func (a *headAppenderBase) commitFloatHistograms(b *appendBatch, acc *appenderCo
 	}
 }
 
+func (a *headAppenderBase) commitSummaries(b *appendBatch, acc *appenderCommitContext) {
+	var ok, chunkCreated bool
+	var series *memSeries
+
+	for i, s := range b.summaries {
+		series = b.summarySeries[i]
+		series.Lock()
+		oooSample, _, err := series.appendableSummary(s.T, s.S, a.headMaxt, a.minValidTime, a.oooTimeWindow)
+		if err != nil {
+			// leaving ooo samples for now.
+			handleAppendableError(err, &acc.summariesAppended, &acc.summaryOOORejected, &acc.summaryOOBRejected, &acc.summaryTooOldRejected)
+		}
+		switch {
+		case err != nil:
+			// Do nothing here.
+		case oooSample:
+			// TODO naman: since i m experimenting with summaries, leaving ooo samples for now.
+		default:
+			newStale := value.IsStaleNaN(s.S.Sum)
+			staleToNonStale := false
+			if series.lastSummaryValue != nil {
+				newStale = newStale && !value.IsStaleNaN(series.lastSummaryValue.Sum)
+				staleToNonStale = value.IsStaleNaN(series.lastSummaryValue.Sum) && !value.IsStaleNaN(s.S.Sum)
+			}
+			ok, chunkCreated = series.appendSummary(s.T, s.S, a.appendID, acc.appendChunkOpts)
+			if ok {
+				if s.T < acc.inOrderMint {
+					acc.inOrderMint = s.T
+				}
+				if s.T > acc.inOrderMaxt {
+					acc.inOrderMaxt = s.T
+				}
+				if newStale {
+					a.head.numStaleSeries.Inc()
+				}
+				if staleToNonStale {
+					a.head.numStaleSeries.Dec()
+				}
+			} else {
+				acc.summariesAppended--
+				acc.summaryOOORejected++
+			}
+		}
+
+		if chunkCreated {
+			a.head.metrics.chunks.Inc()
+			a.head.metrics.chunksCreated.Inc()
+		}
+
+		series.cleanupAppendIDsBelow(a.cleanupAppendIDsBelow)
+		series.pendingCommit = false
+		series.Unlock()
+	}
+}
+
+// we are adding the sample to series ms.
+// returning whether chunk was created or existing
+// chunk was used.
+func (ms *memSeries) appendSummary(t int64, s *summary.Summary, appendID uint64, opts chunkOpts) (bool, bool) {
+	c, sampleInOrder, chunkCreated := ms.appendSummaryPreprocessor(t, chunkenc.EncSummary, opts)
+	// if sample are out of order we have created
+	if !sampleInOrder {
+		return sampleInOrder, chunkCreated
+	}
+
+	var newChunk chunkenc.Chunk
+	// we dont have st for expirement so skipping that for now.
+	newChunk, ms.app, _ = ms.app.AppendSummary(t, 0, s)
+	ms.lastSummaryValue = s
+	if appendID > 0 {
+		ms.txs.add(appendID)
+	}
+
+	if newChunk == nil { // Sample was appended to existing chunk or is the first sample in a new chunk.
+		c.maxTime = t
+		return true, chunkCreated
+	}
+
+	ms.headChunks = &memChunk{
+		chunk:   newChunk,
+		minTime: t,
+		maxTime: t,
+		prev:    ms.headChunks,
+	}
+	ms.nextAt = rangeForTimestamp(t, opts.chunkRange)
+	return true, true
+}
+
+// used for cutting chunk and memory maop to old series.
+// the flow is simple we check if we have headchunk if not we create one
+// and check for ooo sample
+func (ms *memSeries) appendSummaryPreprocessor(t int64, e chunkenc.Encoding, o chunkOpts) (c *memChunk, sampleInOrder bool, chunkCreated bool) {
+	c = ms.headChunks
+
+	if c == nil {
+		if len(ms.mmappedChunks) > 0 && ms.mmappedChunks[len(ms.mmappedChunks)-1].maxTime >= t {
+			// Out of order sample. Sample timestamp is already in the mmapped chunks, so ignore it.
+			return c, false, false
+		}
+		// There is no head chunk in this series yet, create the first chunk for the sample.
+		c = ms.cutNewHeadChunk(t, e, o.chunkRange)
+		chunkCreated = true
+	}
+
+	// Out of order sample.
+	if c.maxTime >= t {
+		return c, false, chunkCreated
+	}
+	if c.chunk.Encoding() != e {
+		// The chunk encoding expected by this append is different than the head chunk's
+		// encoding. So we cut a new chunk with the expected encoding.
+		c = ms.cutNewHeadChunk(t, e, o.chunkRange)
+		chunkCreated = true
+	}
+	numSamples := c.chunk.NumSamples()
+	numBytes := len(c.chunk.Bytes())
+	// i m using same targetBytes size of chunk of summary as histogram for now.
+	// since i dont have the complete idea - https://github.com/prometheus/prometheus/pull/12054
+	targetBytesSummaryChunk := 1024
+	if numSamples == 0 {
+		// It could be the new chunk created after reading the chunk snapshot,
+		// hence we fix the minTime of the chunk here.
+		c.minTime = t
+		ms.nextAt = rangeForTimestamp(c.minTime, o.chunkRange)
+	}
+
+	var nextChunkRangeStart int64
+	if ms.summaryChunkHasComputedEndTime {
+		nextChunkRangeStart = rangeForTimestamp(c.minTime, o.chunkRange)
+	} else {
+		// If we haven't yet computed an end time yet, s.nextAt is either set to
+		// rangeForTimestamp(c.minTime, o.chunkRange) or was set while loading a chunk snapshot. Either way, we want to
+		// skip enforcing chunkenc.MinSamplesPerHistogramChunk.
+		nextChunkRangeStart = ms.nextAt
+	}
+	// If we reach 25% of a chunk's desired maximum size, predict an end time
+	// for this chunk that will try to make samples equally distributed within
+	// the remaining chunks in the current chunk range.
+	// At the latest it must happen at the timestamp set when the chunk was cut.
+	if !ms.summaryChunkHasComputedEndTime && numBytes >= targetBytesSummaryChunk/4 {
+		ratioToFull := float64(targetBytesSummaryChunk) / float64(numBytes)
+		ms.nextAt = computeChunkEndTime(c.minTime, c.maxTime, ms.nextAt, ratioToFull)
+		ms.summaryChunkHasComputedEndTime = true
+	}
+	// If numBytes > targetBytes*2 then our previous prediction was invalid. This could happen if the sample rate has
+	// increased or if the bucket/span count has increased.
+	// Note that next chunk will have its nextAt recalculated for the new rate.
+
+	// keeping chunkenc.MinSamplesPerHistogramChunk for summary as well for now.
+	// since i dont have complete idea how what should happen
+	if (t >= ms.nextAt || numBytes >= targetBytesSummaryChunk*2) && (numSamples >= chunkenc.MinSamplesPerHistogramChunk || t >= nextChunkRangeStart) {
+		c = ms.cutNewHeadChunk(t, e, o.chunkRange)
+		chunkCreated = true
+	}
+
+	// The new chunk will also need a new computed end time.
+	if chunkCreated {
+		ms.summaryChunkHasComputedEndTime = false
+	}
+
+	return c, true, chunkCreated
+}
+
 // commitMetadata commits the metadata for each series in the provided batch.
 // It iterates over the metadata slice and updates the corresponding series
 // with the new metadata information. The series is locked during the update
@@ -1747,6 +2066,7 @@ func (a *headAppenderBase) Commit() (err error) {
 	for _, b := range a.batches {
 		acc.floatsAppended += len(b.floats)
 		acc.histogramsAppended += len(b.histograms) + len(b.floatHistograms)
+		acc.summariesAppended += len(b.summaries)
 		a.commitExemplars(b)
 		defer b.close(h)
 	}
@@ -1766,6 +2086,7 @@ func (a *headAppenderBase) Commit() (err error) {
 		a.commitFloats(b, acc)
 		a.commitHistograms(b, acc)
 		a.commitFloatHistograms(b, acc)
+		a.commitSummaries(b, acc)
 		commitMetadata(b)
 	}
 	// Unmark all series as pending commit after all samples have been committed.
@@ -1773,12 +2094,15 @@ func (a *headAppenderBase) Commit() (err error) {
 
 	h.metrics.outOfOrderSamples.WithLabelValues(sampleMetricTypeFloat).Add(float64(acc.floatOOORejected))
 	h.metrics.outOfOrderSamples.WithLabelValues(sampleMetricTypeHistogram).Add(float64(acc.histoOOORejected))
+	h.metrics.outOfOrderSamples.WithLabelValues(sampleMetricTypeSummary).Add(float64(acc.summaryOOORejected))
 	h.metrics.outOfBoundSamples.WithLabelValues(sampleMetricTypeFloat).Add(float64(acc.floatOOBRejected))
 	h.metrics.tooOldSamples.WithLabelValues(sampleMetricTypeFloat).Add(float64(acc.floatTooOldRejected))
 	h.metrics.samplesAppended.WithLabelValues(sampleMetricTypeFloat).Add(float64(acc.floatsAppended))
 	h.metrics.samplesAppended.WithLabelValues(sampleMetricTypeHistogram).Add(float64(acc.histogramsAppended))
+	h.metrics.samplesAppended.WithLabelValues(sampleMetricTypeSummary).Add(float64(acc.summariesAppended))
 	h.metrics.outOfOrderSamplesAppended.WithLabelValues(sampleMetricTypeFloat).Add(float64(acc.oooFloatsAccepted))
 	h.metrics.outOfOrderSamplesAppended.WithLabelValues(sampleMetricTypeHistogram).Add(float64(acc.oooHistogramAccepted))
+	h.metrics.outOfOrderSamplesAppended.WithLabelValues(sampleMetricTypeSummary).Add(float64(acc.oooSummariesAccepted))
 	h.updateMinMaxTime(acc.inOrderMint, acc.inOrderMaxt)
 	h.updateMinOOOMaxOOOTime(acc.oooMinT, acc.oooMaxT)
 
@@ -1843,6 +2167,7 @@ func (s *memSeries) append(t int64, v float64, appendID uint64, o chunkOpts) (sa
 	s.lastValue = v
 	s.lastHistogramValue = nil
 	s.lastFloatHistogramValue = nil
+	s.lastSummaryValue = nil
 
 	if appendID > 0 {
 		s.txs.add(appendID)

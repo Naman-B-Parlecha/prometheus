@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
@@ -779,6 +780,10 @@ func (p *populateWithDelSeriesIterator) AtHistogram(h *histogram.Histogram) (int
 	return p.curr.AtHistogram(h)
 }
 
+func (p *populateWithDelSeriesIterator) AtSummary(s *summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on populateWithDelSeriesIterator is not supported")
+}
+
 func (p *populateWithDelSeriesIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return p.curr.AtFloatHistogram(fh)
 }
@@ -1208,6 +1213,10 @@ func (it *DeletedIterator) AtHistogram(h *histogram.Histogram) (int64, *histogra
 func (it *DeletedIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	t, h := it.Iter.AtFloatHistogram(fh)
 	return t, h
+}
+
+func (*DeletedIterator) AtSummary(s *summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on DeletedIterator is not supported")
 }
 
 func (it *DeletedIterator) AtT() int64 {

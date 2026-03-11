@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
 )
@@ -433,6 +434,10 @@ func (*mockSeriesIterator) AtT() int64 {
 	return 0 // Not really mocked.
 }
 
+func (*mockSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on mockSeriesIterator is not supported")
+}
+
 func (*mockSeriesIterator) AtST() int64 {
 	return 0 // Not really mocked.
 }
@@ -453,6 +458,10 @@ func (it *fakeSeriesIterator) At() (int64, float64) {
 
 func (it *fakeSeriesIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
 	return it.idx * it.step, &histogram.Histogram{} // Value doesn't matter.
+}
+
+func (*fakeSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on fakeSeriesIterator is not supported")
 }
 
 func (it *fakeSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {

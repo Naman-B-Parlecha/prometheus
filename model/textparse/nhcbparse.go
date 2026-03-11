@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/util/convertnhcb"
 )
 
@@ -394,4 +395,8 @@ func (p *NHCBParser) processNHCB() bool {
 	p.tempExemplarCount = 0
 	p.tempST = 0
 	return err == nil
+}
+
+func (*NHCBParser) Summary() ([]byte, *int64, *summary.Summary) {
+	panic("not implemented: Summary() called on NHCBParser")
 }

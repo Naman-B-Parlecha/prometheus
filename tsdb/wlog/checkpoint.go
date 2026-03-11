@@ -151,6 +151,7 @@ func Checkpoint(logger *slog.Logger, w *WL, from, to int, keep func(id chunks.He
 		samples               []record.RefSample
 		histogramSamples      []record.RefHistogramSample
 		floatHistogramSamples []record.RefFloatHistogramSample
+		summarySamples        []record.RefSummarySample
 		tstones               []tombstones.Stone
 		exemplars             []record.RefExemplar
 		metadata              []record.RefMetadata
@@ -163,7 +164,7 @@ func Checkpoint(logger *slog.Logger, w *WL, from, to int, keep func(id chunks.He
 		latestMetadataMap = make(map[chunks.HeadSeriesRef]record.RefMetadata)
 	)
 	for r.Next() {
-		series, samples, histogramSamples, floatHistogramSamples, tstones, exemplars, metadata = series[:0], samples[:0], histogramSamples[:0], floatHistogramSamples[:0], tstones[:0], exemplars[:0], metadata[:0]
+		series, samples, histogramSamples, floatHistogramSamples, summarySamples, tstones, exemplars, metadata = series[:0], samples[:0], histogramSamples[:0], floatHistogramSamples[:0], summarySamples[:0], tstones[:0], exemplars[:0], metadata[:0]
 
 		// We don't reset the buffer since we batch up multiple records
 		// before writing them to the checkpoint.
@@ -331,6 +332,23 @@ func Checkpoint(logger *slog.Logger, w *WL, from, to int, keep func(id chunks.He
 			}
 			stats.TotalMetadata += len(metadata)
 			stats.DroppedMetadata += len(metadata) - repl
+		case record.SummarySamples:
+			summarySamples, err = dec.SummarySamples(rec, summarySamples)
+			if err != nil {
+				return nil, fmt.Errorf("decode summary samples: %w", err)
+			}
+			// Drop irrelevant summarySamples in place.
+			repl := summarySamples[:0]
+			for _, s := range summarySamples {
+				if s.T >= mint {
+					repl = append(repl, s)
+				}
+			}
+			if len(repl) > 0 {
+				buf = enc.SummarySamples(repl, buf)
+			}
+			stats.TotalSamples += len(summarySamples)
+			stats.DroppedSamples += len(summarySamples) - len(repl)
 		default:
 			// Unknown record type, probably from a future Prometheus version.
 			continue

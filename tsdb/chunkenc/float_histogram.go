@@ -20,6 +20,7 @@ import (
 	"math"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 )
 
@@ -805,6 +806,10 @@ func (a *FloatHistogramAppender) AppendFloatHistogram(prev *FloatHistogramAppend
 	return nil, false, a, nil
 }
 
+func (*FloatHistogramAppender) AppendSummary(t, st int64, s *summary.Summary) (c Chunk, app Appender, err error) {
+	panic("exp: calling AppendSummary on FloatHistogramAppender is not supported")
+}
+
 type floatHistogramIterator struct {
 	br       bstreamReader
 	numTotal uint16
@@ -1154,4 +1159,8 @@ func (it *floatHistogramIterator) readXor(v *float64, leading, trailing *uint8) 
 		return false
 	}
 	return true
+}
+
+func (*floatHistogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("exp: calling AtSummary on floatHistogramIterator is not supported")
 }

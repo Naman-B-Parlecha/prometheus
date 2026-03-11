@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 )
 
 type fanout struct {
@@ -218,6 +219,22 @@ func (f *fanoutAppender) AppendHistogram(ref SeriesRef, l labels.Labels, t int64
 		}
 	}
 	return ref, nil
+}
+func (f *fanoutAppender) AppendSummary(ref SeriesRef, l labels.Labels, t int64, s *summary.Summary) (SeriesRef, error) {
+	// append to primary storage (tsdb)
+	slog.Debug("inside AppendSummary of fanoutAppender")
+	ref, err := f.primary.AppendSummary(ref, l, t, s)
+	if err != nil {
+		return ref, err
+	}
+	// append to all other secondary like receivers
+	for _, appender := range f.secondaries {
+		if _, err := appender.AppendSummary(ref, l, t, s); err != nil {
+			return 0, err
+		}
+	}
+	return ref, nil
+
 }
 
 func (f *fanoutAppender) AppendHistogramSTZeroSample(ref SeriesRef, l labels.Labels, t, st int64, h *histogram.Histogram, fh *histogram.FloatHistogram) (SeriesRef, error) {

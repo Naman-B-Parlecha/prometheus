@@ -31,6 +31,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/prompb"
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
@@ -570,6 +571,10 @@ func (*concreteSeriesIterator) AtST() int64 {
 	return 0
 }
 
+func (*concreteSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on concreteSeriesIterator is not supported")
+}
+
 const noTS = int64(math.MaxInt64)
 
 // Next implements chunkenc.Iterator.
@@ -832,6 +837,10 @@ func (it *chunkedSeriesIterator) AtHistogram(h *histogram.Histogram) (int64, *hi
 
 func (it *chunkedSeriesIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return it.cur.AtFloatHistogram(fh)
+}
+
+func (*chunkedSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on chunkedSeriesIterator is not supported")
 }
 
 func (it *chunkedSeriesIterator) AtT() int64 {

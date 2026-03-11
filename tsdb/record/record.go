@@ -26,6 +26,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/tsdb/encoding"
@@ -58,6 +59,8 @@ const (
 	CustomBucketsHistogramSamples Type = 9
 	// CustomBucketsFloatHistogramSamples is used to match WAL records of type Float Histogram with custom buckets.
 	CustomBucketsFloatHistogramSamples Type = 10
+
+	SummarySamples Type = 11
 )
 
 func (rt Type) String() string {
@@ -82,6 +85,8 @@ func (rt Type) String() string {
 		return "mmapmarkers"
 	case Metadata:
 		return "metadata"
+	case SummarySamples:
+		return "summary_samples"
 	default:
 		return "unknown"
 	}
@@ -195,6 +200,13 @@ type RefFloatHistogramSample struct {
 	FH  *histogram.FloatHistogram
 }
 
+// RefSummarySample is a summary.
+type RefSummarySample struct {
+	Ref chunks.HeadSeriesRef
+	T   int64
+	S   *summary.Summary
+}
+
 // RefMmapMarker marks that the all the samples of the given series until now have been m-mapped to disk.
 type RefMmapMarker struct {
 	Ref     chunks.HeadSeriesRef
@@ -220,7 +232,7 @@ func (*Decoder) Type(rec []byte) Type {
 		return Unknown
 	}
 	switch t := Type(rec[0]); t {
-	case Series, Samples, Tombstones, Exemplars, MmapMarkers, Metadata, HistogramSamples, FloatHistogramSamples, CustomBucketsHistogramSamples, CustomBucketsFloatHistogramSamples:
+	case Series, Samples, Tombstones, Exemplars, MmapMarkers, Metadata, HistogramSamples, FloatHistogramSamples, CustomBucketsHistogramSamples, CustomBucketsFloatHistogramSamples, SummarySamples:
 		return t
 	}
 	return Unknown
@@ -977,5 +989,101 @@ func EncodeFloatHistogram(buf *encoding.Encbuf, h *histogram.FloatHistogram) {
 		for _, v := range h.CustomValues {
 			buf.PutBEFloat64(v)
 		}
+	}
+}
+
+func (*Encoder) SummarySamples(summaries []RefSummarySample, b []byte) []byte {
+	buf := encoding.Encbuf{B: b}
+	buf.PutByte(byte(SummarySamples))
+
+	if len(summaries) == 0 {
+		return buf.Get()
+	}
+
+	// Store base timestamp and base reference number of first sumamary.
+	// All sumamary encode their timestamp and ref as delta to those.
+	first := summaries[0]
+	buf.PutBE64(uint64(first.Ref))
+	buf.PutBE64int64(first.T)
+
+	for _, s := range summaries {
+		buf.PutVarint64(int64(s.Ref) - int64(first.Ref))
+		buf.PutVarint64(s.T - first.T)
+
+		EncodeSummary(&buf, s.S)
+	}
+
+	return buf.Get()
+}
+
+func EncodeSummary(buf *encoding.Encbuf, s *summary.Summary) {
+	buf.PutBEFloat64(s.Count)
+	buf.PutBEFloat64(s.Sum)
+	buf.PutUvarint(len(s.QuantileTargets))
+	for _, s := range s.QuantileTargets {
+		buf.PutBEFloat64(s)
+	}
+
+	buf.PutUvarint(len(s.QuantileValues))
+	for _, s := range s.QuantileValues {
+		buf.PutBEFloat64(s)
+	}
+}
+
+func (d *Decoder) SummarySamples(rec []byte, summaries []RefSummarySample) ([]RefSummarySample, error) {
+	dec := encoding.Decbuf{B: rec}
+	t := Type(dec.Byte())
+	if t != SummarySamples {
+		return nil, errors.New("invalid record type")
+	}
+	if dec.Len() == 0 {
+		return summaries, nil
+	}
+	var (
+		baseRef  = dec.Be64()
+		baseTime = dec.Be64int64()
+	)
+	for len(dec.B) > 0 && dec.Err() == nil {
+		dref := dec.Varint64()
+		dtime := dec.Varint64()
+
+		rs := RefSummarySample{
+			Ref: chunks.HeadSeriesRef(baseRef + uint64(dref)),
+			T:   baseTime + dtime,
+			S:   &summary.Summary{},
+		}
+
+		DecodeSummary(&dec, rs.S)
+
+		summaries = append(summaries, rs)
+	}
+
+	if dec.Err() != nil {
+		return nil, fmt.Errorf("decode error after %d summaries: %w", len(summaries), dec.Err())
+	}
+	if len(dec.B) > 0 {
+		return nil, fmt.Errorf("unexpected %d bytes left in entry", len(dec.B))
+	}
+	return summaries, nil
+}
+
+func DecodeSummary(buf *encoding.Decbuf, s *summary.Summary) {
+	s.Count = buf.Be64Float64()
+	s.Sum = buf.Be64Float64()
+
+	l := buf.Uvarint()
+	if l > 0 {
+		s.QuantileTargets = make([]float64, l)
+	}
+	for i := range s.QuantileTargets {
+		s.QuantileTargets[i] = buf.Be64Float64()
+	}
+
+	l = buf.Uvarint()
+	if l > 0 {
+		s.QuantileValues = make([]float64, l)
+	}
+	for i := range s.QuantileValues {
+		s.QuantileValues[i] = buf.Be64Float64()
 	}
 }

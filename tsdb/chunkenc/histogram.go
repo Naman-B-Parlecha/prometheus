@@ -20,6 +20,7 @@ import (
 	"math"
 
 	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 )
 
@@ -203,6 +204,10 @@ type HistogramAppender struct {
 	sum      float64
 	leading  uint8
 	trailing uint8
+}
+
+func (*HistogramAppender) AppendSummary(t, st int64, s *summary.Summary) (c Chunk, app Appender, err error) {
+	panic("exp: calling AppendSummary on HistogramAppender is not supported")
 }
 
 func (a *HistogramAppender) GetCounterResetHeader() CounterResetHeader {
@@ -896,6 +901,10 @@ type histogramIterator struct {
 	atHistogramCalled, atFloatHistogramCalled bool
 
 	err error
+}
+
+func (*histogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("exp: calling AtSummary on histogramIterator is not supported")
 }
 
 func (it *histogramIterator) Seek(t int64) ValueType {

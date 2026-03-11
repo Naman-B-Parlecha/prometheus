@@ -21,6 +21,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
@@ -238,3 +239,7 @@ func (*histogramIterator) AtT() int64 { return 0 }
 func (*histogramIterator) AtST() int64 { return 0 }
 
 func (*histogramIterator) Err() error { return nil }
+
+func (*histogramIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on histogramIterator is not supported")
+}

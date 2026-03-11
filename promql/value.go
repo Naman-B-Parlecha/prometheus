@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -490,6 +491,10 @@ func (ssi *storageSeriesIterator) AtT() int64 {
 // TODO(krajorama): implement AtST.
 func (*storageSeriesIterator) AtST() int64 {
 	return 0
+}
+
+func (*storageSeriesIterator) AtSummary(*summary.Summary) (int64, *summary.Summary) {
+	panic("calling AtSummary on storageSeriesIterator is not supported")
 }
 
 func (ssi *storageSeriesIterator) Next() chunkenc.ValueType {

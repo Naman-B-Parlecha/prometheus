@@ -37,6 +37,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/prompb"
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/prometheus/prometheus/storage"
@@ -1397,6 +1398,10 @@ func (m *mockAppendable) AppendExemplar(ref storage.SeriesRef, l labels.Labels, 
 	m.latestExemplar[uint64(ref)] = e.Ts
 	m.exemplars = append(m.exemplars, mockExemplar{l, e.Labels, e.Ts, e.Value})
 	return ref, nil
+}
+
+func (a *mockAppendable) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on mockAppendable")
 }
 
 func (m *mockAppendable) AppendHistogram(_ storage.SeriesRef, l labels.Labels, t int64, h *histogram.Histogram, fh *histogram.FloatHistogram) (storage.SeriesRef, error) {

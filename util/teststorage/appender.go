@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/metadata"
+	"github.com/prometheus/prometheus/model/summary"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/util/testutil"
@@ -397,6 +398,10 @@ func (a *Appendable) Appender(ctx context.Context) storage.Appender {
 }
 
 func (*appender) SetOptions(*storage.AppendOptions) {}
+
+func (a *appender) AppendSummary(ref storage.SeriesRef, l labels.Labels, t int64, s *summary.Summary) (storage.SeriesRef, error) {
+	panic("not implemented: calling appendSummary on appender")
+}
 
 func (a *appender) Append(ref storage.SeriesRef, ls labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if err := a.checkErr(); err != nil {
